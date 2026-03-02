@@ -1,0 +1,94 @@
+import type { PanelLocale } from './types';
+
+const messages = {
+	zh: {
+		appTitle: 'Surge Geosite',
+		appSubTitle: '把上游 geosite 数据集转换为 Surge 可用规则，开箱即用。',
+		datasets: '数据集列表',
+		searchPlaceholder: '搜索数据集，例如 google',
+		selectedDataset: '当前选中',
+		filterTag: '标签过滤',
+		manualTag: '手动标签（可选）',
+		manualTagPlaceholder: '例如 cn',
+		loadRules: '加载规则',
+		upstreamEtag: 'upstream etag:',
+		staleFallback: '旧版本回退:',
+		mode: '模式:',
+		rules: '规则数量:',
+		rulePreview: '规则预览',
+		openRawUrl: '打开原始链接',
+		datasetInfo: '数据集信息',
+		sourceFile: '源文件:',
+		filterCount: '过滤数量:',
+		quickLinks: '快捷链接',
+		loading: 'loading...',
+		noMatch: '没有匹配数据集',
+		emptyResult: '(空结果)',
+		listsCount: '{count} 个数据集',
+		initializing: '初始化中...',
+		upstreamInitializing: '上游正在初始化（{current}/{total}），请稍候…',
+		failedLoad: '加载 /geosite 失败\n{message}',
+		requestFailed: '请求失败：{message}',
+		indexEmpty: '数据索引为空',
+		yes: '是',
+		no: '否',
+		noneOption: '(无)',
+		error: '错误',
+		switchedDatasetLoading: '已切换到 {name}，正在加载默认规则…',
+		modeSwitchLoading: '已切换到 {mode} 模式，正在加载…',
+		filterSwitchLoading: '标签已切换，正在加载…',
+		filterInputLoading: '手动标签已更新，正在加载…',
+		selectDataset: '请选择一个数据集。',
+		github: 'GitHub'
+	},
+	en: {
+		appTitle: 'Surge Geosite',
+		appSubTitle: 'Geosite datasets, converted for Surge and ready to use.',
+		datasets: 'DATASETS',
+		searchPlaceholder: 'Search datasets, e.g. google',
+		selectedDataset: 'SELECTED DATASET',
+		filterTag: 'Filter Tag',
+		manualTag: 'Manual Tag (Optional)',
+		manualTagPlaceholder: 'e.g. cn',
+		loadRules: 'Load Rules',
+		upstreamEtag: 'upstream etag:',
+		staleFallback: 'stale fallback:',
+		mode: 'mode:',
+		rules: 'rules:',
+		rulePreview: 'RULE PREVIEW',
+		openRawUrl: 'Open Raw URL',
+		datasetInfo: 'DATASET INFO',
+		sourceFile: 'source file:',
+		filterCount: 'filter count:',
+		quickLinks: 'QUICK LINKS',
+		loading: 'loading...',
+		noMatch: 'No datasets matched',
+		emptyResult: '(empty result)',
+		listsCount: '{count} lists',
+		initializing: 'initializing...',
+		upstreamInitializing: 'Upstream is initializing ({current}/{total}), please wait...',
+		failedLoad: 'Failed to load /geosite\n{message}',
+		requestFailed: 'Request failed: {message}',
+		indexEmpty: 'index is empty',
+		yes: 'yes',
+		no: 'no',
+		noneOption: '(none)',
+		error: 'error',
+		switchedDatasetLoading: 'Switched to {name}, loading default rules...',
+		modeSwitchLoading: 'Mode switched to {mode}, loading...',
+		filterSwitchLoading: 'Filter changed, loading...',
+		filterInputLoading: 'Manual filter updated, loading...',
+		selectDataset: 'Please select a dataset.',
+		github: 'GitHub'
+	}
+} as const;
+
+export function t(locale: PanelLocale, key: keyof (typeof messages)['zh'] | string, vars: Record<string, string | number> = {}): string {
+	const table = messages[locale] ?? messages.zh;
+	const fallback = messages.zh;
+	let text = (table as Record<string, string>)[key] ?? (fallback as Record<string, string>)[key] ?? key;
+	for (const [name, value] of Object.entries(vars)) {
+		text = text.replace(`{${name}}`, String(value));
+	}
+	return text;
+}
