@@ -271,7 +271,7 @@ async function handleFetch(request: Request, env: WorkerEnv, ctx: ExecutionConte
   const path = url.pathname;
 
   if (path === "/geosite") {
-    return handleGeositeIndex(env, ctx);
+    return handleGeositeIndex(request, env, ctx);
   }
 
   if (!path.startsWith("/geosite/")) {
@@ -305,36 +305,42 @@ async function handleFetch(request: Request, env: WorkerEnv, ctx: ExecutionConte
     nameWithFilter = decoded;
   }
 
-  return handleGeositeRules(mode, nameWithFilter, env, ctx);
+  return handleGeositeRules(request, mode, nameWithFilter, env, ctx);
 }
 
-async function handleGeositeIndex(env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response> {
+async function handleGeositeIndex(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response> {
   const latest = await ensureLatestState(env);
   if (!latest) {
     return json(503, { ok: false, error: "geosite data not ready" });
   }
 
+  const indexEtag = buildIndexEtag(latest.upstream.etag);
+  const indexHeaders = {
+    "cache-control": "public, max-age=60, s-maxage=300, stale-while-revalidate=900",
+    etag: indexEtag,
+    "x-upstream-etag": latest.upstream.etag,
+    "x-generated-at": latest.snapshot.generatedAt,
+    "x-checked-at": latest.checkedAt
+  };
+
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), indexEtag)) {
+    return notModified(indexHeaders);
+  }
+
   const index = await readJson<GeositeIndex>(env.GEOSITE_BUCKET, latest.snapshot.indexKey);
   if (index) {
-    return json(200, index, {
-      "x-upstream-etag": latest.upstream.etag,
-      "x-generated-at": latest.snapshot.generatedAt,
-      "x-checked-at": latest.checkedAt
-    });
+    return json(200, index, indexHeaders);
   }
 
   const snapshot = await loadSnapshotPayload(env, latest);
   const builtIndex = buildIndexFromSources(snapshot.lists);
   ctx.waitUntil(writeJson(env.GEOSITE_BUCKET, latest.snapshot.indexKey, builtIndex));
 
-  return json(200, builtIndex, {
-    "x-upstream-etag": latest.upstream.etag,
-    "x-generated-at": latest.snapshot.generatedAt,
-    "x-checked-at": latest.checkedAt
-  });
+  return json(200, builtIndex, indexHeaders);
 }
 
 async function handleGeositeRules(
+  request: Request,
   mode: RegexMode,
   nameWithFilter: string,
   env: WorkerEnv,
@@ -353,7 +359,12 @@ async function handleGeositeRules(
   const latestKey = artifactKey(latest.upstream.etag, mode, name, filter);
   const latestArtifact = await readText(env.GEOSITE_BUCKET, latestKey);
   if (latestArtifact !== null) {
-    return text(200, latestArtifact, responseHeaders(latest.upstream.etag, mode, name, filter, false));
+    const responseEtag = buildRulesEtag(latest.upstream.etag, mode, name, filter);
+    const headers = responseHeaders(latest.upstream.etag, mode, name, filter, false);
+    if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
+      return notModified(headers);
+    }
+    return text(200, latestArtifact, headers);
   }
 
   const index = await readJson<GeositeIndex>(env.GEOSITE_BUCKET, latest.snapshot.indexKey);
@@ -367,13 +378,18 @@ async function handleGeositeRules(
     const staleKey = artifactKey(latest.previousEtag, mode, name, filter);
     const staleArtifact = await readText(env.GEOSITE_BUCKET, staleKey);
     if (staleArtifact !== null) {
+      const responseEtag = buildRulesEtag(latest.previousEtag, mode, name, filter);
+      const headers = responseHeaders(latest.previousEtag, mode, name, filter, true);
       ctx.waitUntil(
         compilePromise
           .then((result) => maybeEnrichIndexFilters(env, latest, name, result.availableFilters))
           .catch(() => undefined)
       );
 
-      return text(200, staleArtifact, responseHeaders(latest.previousEtag, mode, name, filter, true));
+      if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
+        return notModified(headers);
+      }
+      return text(200, staleArtifact, headers);
     }
   }
 
@@ -386,7 +402,12 @@ async function handleGeositeRules(
     ctx.waitUntil(maybeEnrichIndexFilters(env, latest, name, build.availableFilters));
   }
 
-  return text(200, build.output, responseHeaders(latest.upstream.etag, mode, name, filter, false));
+  const responseEtag = buildRulesEtag(latest.upstream.etag, mode, name, filter);
+  const headers = responseHeaders(latest.upstream.etag, mode, name, filter, false);
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
+    return notModified(headers);
+  }
+  return text(200, build.output, headers);
 }
 
 function splitNameFilter(input: string): { name: string; filter: string | null } {
@@ -411,14 +432,51 @@ function responseHeaders(
   filter: string | null,
   stale: boolean
 ): Record<string, string> {
+  const responseEtag = buildRulesEtag(etag, mode, name, filter);
   return {
     "content-type": "text/plain; charset=utf-8",
+    "cache-control": stale
+      ? "public, max-age=60, s-maxage=120, stale-while-revalidate=900"
+      : "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
+    etag: responseEtag,
     "x-upstream-etag": etag,
     "x-mode": mode,
     "x-list": name.toLowerCase(),
     ...(filter ? { "x-filter": filter } : {}),
     ...(stale ? { "x-stale": "1" } : {})
   };
+}
+
+function buildIndexEtag(upstreamEtag: string): string {
+  return `"${upstreamEtag}-index"`;
+}
+
+function buildRulesEtag(upstreamEtag: string, mode: RegexMode, name: string, filter: string | null): string {
+  return `"${upstreamEtag}:${mode}:${name.toLowerCase()}${filter ? `@${filter}` : ""}"`;
+}
+
+function matchesIfNoneMatch(ifNoneMatch: string | null, etag: string): boolean {
+  if (!ifNoneMatch) {
+    return false;
+  }
+
+  if (ifNoneMatch.trim() === "*") {
+    return true;
+  }
+
+  return ifNoneMatch
+    .split(",")
+    .map((item) => item.trim())
+    .some((item) => item === etag);
+}
+
+function notModified(headers: Record<string, string>): Response {
+  const nextHeaders = { ...headers };
+  delete nextHeaders["content-type"];
+  return new Response(null, {
+    status: 304,
+    headers: nextHeaders
+  });
 }
 
 async function ensureArtifactForLatest(
