@@ -1,25 +1,35 @@
-# Surge Geosite
+<div align="center">
+  <h1>Surge Geosite</h1>
+  <p>
+    中文 | <a href="./README.md">English</a>
+  </p>
+  <p>自动转换 <code>v2fly/domain-list-community</code> 数据集为 Surge 可直接使用的规则。</p>
+  <p>
+    <a href="https://surge.bojin.co"><strong>打开可视化面板</strong></a>
+  </p>
+</div>
 
-Geosite 数据集到 Surge Ruleset 的边缘转换服务。
+<p align="center">
+  <img src="./docs/assets/panel-dashboard.png" alt="Surge Geosite 面板" width="600" />
+</p>
 
-在线服务地址：`https://surge.bojin.co`
+## 直接使用
 
-这个项目的目标很简单：以 `v2fly/domain-list-community` 为上游源，持续产出 Surge 可直接使用的规则，并通过同域名 API + 面板提供查询与预览。
+1. 打开可视化面板：https://surge.bojin.co。
+2. 搜索并选择数据集。
+3. 复制页面给出的原始链接。
+4. 粘贴到 Surge 规则中。
 
-## 在线使用
+如果你要直接使用规则链接，格式是：
 
-- 面板：首页 `https://surge.bojin.co/`
-- 数据集索引：`https://surge.bojin.co/geosite`
-- 默认模式（balanced）：`https://surge.bojin.co/geosite/apple@cn`
-- 指定模式：`https://surge.bojin.co/geosite/strict/apple@cn`
-- 指定模式：`https://surge.bojin.co/geosite/balanced/apple@cn`
-- 指定模式：`https://surge.bojin.co/geosite/full/apple@cn`
+- 规则路径：`https://surge.bojin.co/geosite/:name_with_filter`
 
-## API
+`name_with_filter` 有两种：
 
-- `GET /geosite`
-- `GET /geosite/:name_with_filter`（默认 `balanced`）
-- `GET /geosite/:mode/:name_with_filter`，其中 `mode = strict | balanced | full`
+- 不带 filter：`apple`
+  返回 `apple` 这个数据集的完整规则。
+- 带 filter：`apple@cn`
+  只返回带 `@cn` 标签的规则。
 
 Surge 引用示例：
 
@@ -29,91 +39,37 @@ RULE-SET,https://surge.bojin.co/geosite/apple@cn,DIRECT
 RULE-SET,https://surge.bojin.co/geosite/strict/category-ads-all,REJECT
 ```
 
-`name_with_filter` 语义：
+## 高级使用
 
-- `apple`：返回完整数据集转换结果
-- `apple@cn`：仅返回带 `@cn` 属性的规则
+### API
 
-## 模式说明
+- `GET /geosite`
+- `GET /geosite/:name_with_filter`（默认模式：`balanced`）
+- `GET /geosite/:mode/:name_with_filter`
 
-- `strict`：仅接受无损 regex 转换，不能无损的直接跳过
-- `balanced`：可控降级（默认服务模式）
-- `full`：最宽松转换，覆盖率最高，也最可能放宽匹配边界
+### 模式说明
 
-## 当前架构（v2）
+- `strict`：仅接受无损 regex 转换
+- `balanced`：可控降级（默认）
+- `full`：最宽松转换（覆盖范围最大，误匹配风险也最高）
 
-同域双 Worker 架构：
+## 维护者说明
 
-- API Worker（`packages/worker`）：负责 `/geosite*` 与定时刷新
-- Panel Worker（`packages/panel`）：负责 SvelteKit 面板页面
-
-刷新流程：
-
-1. `HEAD` 上游 ZIP 检查 ETag
-2. ETag 未变化时只更新检查时间
-3. ETag 变化时下载 ZIP，提取 `data/*`，写入 R2 快照与索引，最后更新 `state/latest.json`
-
-请求流程：
-
-1. 优先命中 `artifacts/{etag}/{mode}/{name[@filter]}.txt`
-2. 未命中时按需构建并写回 artifact
-3. 非过滤请求在条件满足时可先回旧 artifact（stale）并后台刷新
-
-## R2 存储布局
-
-- `state/latest.json`
-- `snapshots/{etag}/sources.json.gz`
-- `snapshots/{etag}/index/geosite.json`
-- `artifacts/{etag}/{mode}/{name[@filter]}.txt`
-
-建议在 Cloudflare R2 后台给 `snapshots/` 与 `artifacts/` 配置 Lifecycle 清理策略（例如 7-30 天）。
-
-## 仓库结构
-
-- `packages/core`：纯转换核心库（parser / resolver / regex / surge emitter）
-- `packages/worker`：Cloudflare Worker API + cron + R2 读写
-- `packages/panel`：SvelteKit SSR 面板（shadcn-svelte）
-- `packages/cli`：本地调试构建工具（非生产依赖）
-
-## 本地开发
-
-前置：Node.js 24+、pnpm。
+本地开发：
 
 ```bash
 pnpm install
 pnpm build
 pnpm test
-```
-
-面板开发：
-
-```bash
 pnpm panel:dev
-```
-
-API Worker 本地开发：
-
-```bash
 pnpm worker:dev
 ```
 
-Worker 本地开发（含 cron 模拟）：
+部署：
 
 ```bash
-pnpm worker:dev:cron
-```
-
-## 部署（Cloudflare）
-
-```bash
-pnpm worker:login
-pnpm worker:r2:create
 pnpm panel:deploy
 pnpm worker:deploy
 ```
 
-`packages/worker/wrangler.toml` 已包含：
-
-- `name = "surge-geosite"`
-- `triggers.crons = ["*/5 * * * *"]`
-- `GEOSITE_BUCKET` R2 绑定
+技术架构文档：[docs/architecture.md](./docs/architecture.md)
