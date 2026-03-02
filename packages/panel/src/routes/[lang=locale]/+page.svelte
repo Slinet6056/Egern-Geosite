@@ -5,6 +5,7 @@
 	import { onMount } from 'svelte';
 
 	import { buildRulesApiPath, buildRulesPublicPath } from '$lib/panel/api';
+	import { SSR_INITIAL_LIST_LIMIT } from '$lib/panel/constants';
 	import { t } from '$lib/panel/i18n';
 	import type { GeositeIndex, PanelLocale, PanelMode } from '$lib/panel/types';
 	import { countRuleLines, normalizeEtag } from '$lib/panel/utils';
@@ -21,6 +22,7 @@
 
 	const MODES: PanelMode[] = ['strict', 'balanced', 'full'];
 	const NONE_FILTER = '__none__';
+	const SITE_ORIGIN = 'https://surge.bojin.co';
 
 	export let data: PageData;
 
@@ -42,6 +44,7 @@
 	let isIndexLoading: boolean;
 	let isRulesLoading: boolean;
 	let initError: string | null;
+	let isIndexHydrating: boolean;
 
 	let loadToken = 0;
 	let lastQueryKey = '';
@@ -72,6 +75,7 @@
 		rawLink = next.rawLink ?? '#';
 		isIndexLoading = false;
 		isRulesLoading = false;
+		isIndexHydrating = false;
 		initError = next.initError ?? null;
 		lastQueryKey = selected ? `${selected}|${mode}|` : '';
 	}
@@ -88,6 +92,9 @@
 		}
 		return names.filter((name) => name.includes(query));
 	})();
+	$: renderLimit = browser && hasFullIndex ? filteredNames.length : SSR_INITIAL_LIST_LIMIT;
+	$: displayNames = filteredNames.slice(0, renderLimit);
+	$: hasFullIndex = names.length > 0 && Object.keys(index).length >= names.length;
 
 	$: liveFilter = (() => {
 		const manual = manualFilter.trim().toLowerCase();
@@ -120,6 +127,8 @@
 	} else {
 		listCount = tr('listsCount', { count: names.length });
 	}
+	$: canonicalPath = locale === 'en' ? '/en' : '/zh';
+	$: canonicalUrl = `${SITE_ORIGIN}${canonicalPath}`;
 
 	$: if (browser) {
 		if (manualDebounceTimer) {
@@ -249,6 +258,31 @@
 		}
 	}
 
+	async function hydrateFullIndexIfNeeded() {
+		if (isIndexHydrating || hasFullIndex || names.length === 0 || initError) {
+			return;
+		}
+
+		isIndexHydrating = true;
+		try {
+			const response = await fetch('/geosite', {
+				headers: { accept: 'application/json' }
+			});
+			if (!response.ok) {
+				return;
+			}
+
+			const fullIndex = (await response.json()) as GeositeIndex;
+			if (Object.keys(fullIndex).length > Object.keys(index).length) {
+				index = fullIndex;
+			}
+		} catch {
+			// Keep current partial index when hydration fetch fails.
+		} finally {
+			isIndexHydrating = false;
+		}
+	}
+
 	function onSelectDataset(name: string) {
 		if (name === selected) {
 			return;
@@ -282,6 +316,8 @@
 	onMount(() => {
 		if (names.length === 0 && !initError) {
 			void initIndex();
+		} else {
+			void hydrateFullIndexIfNeeded();
 		}
 
 		return () => {
@@ -300,6 +336,10 @@
 			? 'Surge Geosite 面板：按模式和标签生成可直接使用的规则。'
 			: 'Surge Geosite panel for generating ready-to-use rules by mode and filter.'}
 	/>
+	<link rel="canonical" href={canonicalUrl} />
+	<link rel="alternate" hreflang="zh-CN" href={`${SITE_ORIGIN}/zh`} />
+	<link rel="alternate" hreflang="en" href={`${SITE_ORIGIN}/en`} />
+	<link rel="alternate" hreflang="x-default" href={`${SITE_ORIGIN}/en`} />
 </svelte:head>
 
 <main class="mx-auto flex min-h-dvh w-full max-w-[1400px] flex-col gap-4 box-border px-4 py-4 lg:h-dvh lg:overflow-hidden lg:px-8">
@@ -312,20 +352,20 @@
 					<p class="text-muted-foreground text-sm">{tr('appSubTitle')}</p>
 				</div>
 				<div class="flex items-center gap-2">
-					<div class="inline-flex overflow-hidden rounded-md border">
-						<a
-							class={`px-3 py-1.5 text-sm font-medium transition-colors ${locale === 'zh' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
-							href="/zh/"
-							data-sveltekit-preload-data="hover"
-						>
-							ZH
-						</a>
-						<a
-							class={`border-l px-3 py-1.5 text-sm font-medium transition-colors ${locale === 'en' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
-							href="/en/"
-							data-sveltekit-preload-data="hover"
-						>
-							EN
+						<div class="inline-flex overflow-hidden rounded-md border">
+							<a
+								class={`px-3 py-1.5 text-sm font-medium transition-colors ${locale === 'zh' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
+								href="/zh"
+								data-sveltekit-preload-data="hover"
+							>
+								ZH
+							</a>
+							<a
+								class={`border-l px-3 py-1.5 text-sm font-medium transition-colors ${locale === 'en' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
+								href="/en"
+								data-sveltekit-preload-data="hover"
+							>
+								EN
 						</a>
 					</div>
 					<a
@@ -366,7 +406,7 @@
 					{:else if filteredNames.length === 0}
 						<p class="text-muted-foreground px-2 py-3 text-xs">{tr('noMatch')}</p>
 					{:else}
-						{#each filteredNames.slice(0, 1000) as name (name)}
+						{#each displayNames as name (name)}
 							<button
 								type="button"
 								on:click={() => onSelectDataset(name)}
@@ -375,9 +415,16 @@
 								}`}
 							>
 								<span class="font-mono">{name}</span>
-								<span class="text-muted-foreground font-mono text-xs">@{index[name]?.filters?.length ?? 0}</span>
-							</button>
-						{/each}
+									<span class="text-muted-foreground font-mono text-xs">
+										@{index[name] ? (index[name]?.filters?.length ?? 0) : '-'}
+									</span>
+									</button>
+								{/each}
+						{#if browser && !hasFullIndex}
+							<p class="text-muted-foreground px-2 py-3 text-xs">
+								{tr('indexHydrating')}
+							</p>
+						{/if}
 					{/if}
 				</div>
 			</CardContent>

@@ -1,4 +1,5 @@
 import { buildRulesPublicPath } from '$lib/panel/api';
+import { SSR_INITIAL_LIST_LIMIT } from '$lib/panel/constants';
 import { t } from '$lib/panel/i18n';
 import { countRuleLines } from '$lib/panel/utils';
 
@@ -6,6 +7,101 @@ import type { GeositeIndex, PanelLocale, PanelMode } from '$lib/panel/types';
 import type { PageServerLoad } from './$types';
 
 const DEFAULT_MODE: PanelMode = 'balanced';
+const RULES_CACHE_LIMIT = 64;
+const INDEX_REVALIDATE_INTERVAL_MS = 20_000;
+
+type IndexCacheEntry = {
+	fullIndex: GeositeIndex;
+	names: string[];
+	etag: string;
+};
+
+type RulesCacheEntry = {
+	text: string;
+	etag: string;
+	stale: boolean;
+	ruleLines: string;
+};
+
+let indexCache: IndexCacheEntry | null = null;
+let indexRevalidateInFlight = false;
+let nextIndexRevalidateAt = 0;
+const rulesCache = new Map<string, RulesCacheEntry>();
+
+function pruneRulesCache(): void {
+	while (rulesCache.size > RULES_CACHE_LIMIT) {
+		const firstKey = rulesCache.keys().next();
+		if (firstKey.done) {
+			return;
+		}
+		rulesCache.delete(firstKey.value);
+	}
+}
+
+function getUpstreamEtag(headers: Headers): string {
+	return headers.get('x-upstream-etag') ?? headers.get('etag') ?? '-';
+}
+
+async function fetchIndexFresh(fetchFn: typeof fetch): Promise<IndexCacheEntry> {
+	const response = await fetchFn('/geosite', {
+		headers: {
+			accept: 'application/json'
+		}
+	});
+	if (!response.ok) {
+		throw new Error(`${response.status} ${response.statusText}`);
+	}
+
+	const fullIndex = (await response.json()) as GeositeIndex;
+	const names = Object.keys(fullIndex).sort();
+	const etag = getUpstreamEtag(response.headers);
+
+	const next: IndexCacheEntry = {
+		fullIndex,
+		names,
+		etag
+	};
+	indexCache = next;
+	return next;
+}
+
+async function maybeRevalidateIndex(fetchFn: typeof fetch): Promise<void> {
+	if (!indexCache || indexRevalidateInFlight) {
+		return;
+	}
+	if (Date.now() < nextIndexRevalidateAt) {
+		return;
+	}
+
+	indexRevalidateInFlight = true;
+	nextIndexRevalidateAt = Date.now() + INDEX_REVALIDATE_INTERVAL_MS;
+
+	try {
+		const response = await fetchFn('/geosite', {
+			headers: {
+				accept: 'application/json',
+				'if-none-match': indexCache.etag
+			}
+		});
+		if (response.status === 304) {
+			return;
+		}
+		if (!response.ok) {
+			return;
+		}
+
+		const fullIndex = (await response.json()) as GeositeIndex;
+		indexCache = {
+			fullIndex,
+			names: Object.keys(fullIndex).sort(),
+			etag: getUpstreamEtag(response.headers)
+		};
+	} catch {
+		// Keep serving existing cache on revalidation failures.
+	} finally {
+		indexRevalidateInFlight = false;
+	}
+}
 
 export const load: PageServerLoad = async ({ params, fetch }) => {
 	const locale = params.lang as PanelLocale;
@@ -22,36 +118,65 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
 	let initError: string | null = null;
 
 	try {
-		const indexResponse = await fetch('/geosite', {
-			headers: {
-				accept: 'application/json'
-			}
-		});
-		if (!indexResponse.ok) {
-			throw new Error(`${indexResponse.status} ${indexResponse.statusText}`);
+		let currentIndex = indexCache;
+		if (!currentIndex) {
+			currentIndex = await fetchIndexFresh(fetch);
+		} else {
+			void maybeRevalidateIndex(fetch);
 		}
-		index = (await indexResponse.json()) as GeositeIndex;
-		names = Object.keys(index).sort();
+
+		names = currentIndex.names;
+		const fullIndex = currentIndex.fullIndex;
 
 		if (names.length === 0) {
 			previewText = tr('indexEmpty');
 		} else {
 			selected = names[0];
-			rawLink = buildRulesPublicPath(DEFAULT_MODE, selected, null);
-			const rulesResponse = await fetch(`/geosite/${DEFAULT_MODE}/${encodeURIComponent(selected)}`, {
-				headers: {
-					accept: 'text/plain'
+			const initialIndex: GeositeIndex = {};
+				for (const name of names.slice(0, SSR_INITIAL_LIST_LIMIT)) {
+				const entry = fullIndex[name];
+				if (entry) {
+					initialIndex[name] = entry;
 				}
-			});
-			const rulesText = await rulesResponse.text();
+			}
+			const selectedEntry = fullIndex[selected];
+			if (selectedEntry) {
+				initialIndex[selected] = selectedEntry;
+			}
+			index = initialIndex;
 
-			etag = rulesResponse.headers.get('x-upstream-etag') ?? '-';
-			stale = rulesResponse.headers.get('x-stale') === '1' ? tr('yes') : tr('no');
-			if (!rulesResponse.ok) {
-				previewText = `${rulesResponse.status} ${rulesResponse.statusText}\n${rulesText}`.trim();
+			rawLink = buildRulesPublicPath(DEFAULT_MODE, selected, null);
+			const rulesKey = `${currentIndex.etag}:${DEFAULT_MODE}:${selected}`;
+			const cachedRules = rulesCache.get(rulesKey);
+
+			if (cachedRules) {
+				previewText = cachedRules.text.length === 0 ? tr('emptyResult') : cachedRules.text;
+				etag = cachedRules.etag;
+				stale = cachedRules.stale ? tr('yes') : tr('no');
+				ruleLines = cachedRules.ruleLines;
 			} else {
-				previewText = rulesText.length === 0 ? tr('emptyResult') : rulesText;
-				ruleLines = String(countRuleLines(rulesText));
+				const rulesResponse = await fetch(`/geosite/${DEFAULT_MODE}/${encodeURIComponent(selected)}`, {
+					headers: {
+						accept: 'text/plain'
+					}
+				});
+				const rulesText = await rulesResponse.text();
+
+				etag = rulesResponse.headers.get('x-upstream-etag') ?? currentIndex.etag;
+				stale = rulesResponse.headers.get('x-stale') === '1' ? tr('yes') : tr('no');
+				if (!rulesResponse.ok) {
+					previewText = `${rulesResponse.status} ${rulesResponse.statusText}\n${rulesText}`.trim();
+				} else {
+					previewText = rulesText.length === 0 ? tr('emptyResult') : rulesText;
+					ruleLines = String(countRuleLines(rulesText));
+					rulesCache.set(rulesKey, {
+						text: rulesText,
+						etag,
+						stale: rulesResponse.headers.get('x-stale') === '1',
+						ruleLines
+					});
+					pruneRulesCache();
+				}
 			}
 		}
 	} catch (error) {

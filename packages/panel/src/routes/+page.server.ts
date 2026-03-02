@@ -1,6 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-
-import type { PageServerLoad } from './$types';
+import type { ServerLoad } from '@sveltejs/kit';
 
 function detectLang(acceptLanguage: string | null): 'zh' | 'en' {
 	if (!acceptLanguage) {
@@ -15,7 +14,7 @@ function detectLang(acceptLanguage: string | null): 'zh' | 'en' {
 	return 'en';
 }
 
-export const load: PageServerLoad = ({ request }) => {
+export const load: ServerLoad = ({ request }) => {
 	const lang = detectLang(request.headers.get('accept-language'));
-	throw redirect(307, `/${lang}/`);
+	throw redirect(307, `/${lang}`);
 };
