@@ -42,11 +42,10 @@ RULE-SET,https://surge.bojin.co/geosite/strict/category-ads-all,REJECT
 
 ## 当前架构（v2）
 
-Cloudflare Worker 同时承担 API、面板静态资源托管和定时刷新。
+同域双 Worker 架构：
 
-- API：`/geosite*`
-- 面板：非 API 路径通过 `ASSETS` 返回
-- 定时刷新：Cron 每 5 分钟执行
+- API Worker（`packages/worker`）：负责 `/geosite*` 与定时刷新
+- Panel Worker（`packages/panel`）：负责 SvelteKit 面板页面
 
 刷新流程：
 
@@ -73,7 +72,7 @@ Cloudflare Worker 同时承担 API、面板静态资源托管和定时刷新。
 
 - `packages/core`：纯转换核心库（parser / resolver / regex / surge emitter）
 - `packages/worker`：Cloudflare Worker API + cron + R2 读写
-- `packages/panel`：Astro 面板（同域托管）
+- `packages/panel`：SvelteKit SSR 面板（shadcn-svelte）
 - `packages/cli`：本地调试构建工具（非生产依赖）
 
 ## 本地开发
@@ -92,7 +91,7 @@ pnpm test
 pnpm panel:dev
 ```
 
-Worker 本地开发（同域 API + panel）：
+API Worker 本地开发：
 
 ```bash
 pnpm worker:dev
@@ -109,12 +108,12 @@ pnpm worker:dev:cron
 ```bash
 pnpm worker:login
 pnpm worker:r2:create
+pnpm panel:deploy
 pnpm worker:deploy
 ```
 
-`wrangler.toml` 已包含：
+`packages/worker/wrangler.toml` 已包含：
 
 - `name = "surge-geosite"`
-- `assets.directory = "../panel/dist"`
 - `triggers.crons = ["*/5 * * * *"]`
 - `GEOSITE_BUCKET` R2 绑定

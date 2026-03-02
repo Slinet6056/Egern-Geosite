@@ -42,11 +42,10 @@ RULE-SET,https://surge.bojin.co/geosite/strict/category-ads-all,REJECT
 
 ## Current Architecture (v2)
 
-Cloudflare Worker handles API serving, panel static hosting, and scheduled refresh.
+Two Cloudflare Workers on the same domain:
 
-- API: `/geosite*`
-- Panel: non-API paths are served via `ASSETS`
-- Refresh: cron runs every 5 minutes
+- API Worker (`packages/worker`): serves `/geosite*` and runs scheduled refresh
+- Panel Worker (`packages/panel`): SvelteKit panel for non-API paths
 
 Refresh flow:
 
@@ -73,7 +72,7 @@ Recommended: configure R2 Lifecycle policies for `snapshots/` and `artifacts/` (
 
 - `packages/core`: pure conversion core (parser / resolver / regex / surge emitter)
 - `packages/worker`: Cloudflare Worker API + cron + R2 IO
-- `packages/panel`: Astro panel (same-domain hosting)
+- `packages/panel`: SvelteKit SSR panel worker (shadcn-svelte UI)
 - `packages/cli`: local debug tool (not required for production serving)
 
 ## Local Development
@@ -92,7 +91,7 @@ Panel dev:
 pnpm panel:dev
 ```
 
-Worker dev (same-domain API + panel):
+API worker dev:
 
 ```bash
 pnpm worker:dev
@@ -109,13 +108,13 @@ pnpm worker:dev:cron
 ```bash
 pnpm worker:login
 pnpm worker:r2:create
+pnpm panel:deploy
 pnpm worker:deploy
 ```
 
 `wrangler.toml` includes:
 
 - `name = "surge-geosite"`
-- `assets.directory = "../panel/dist"`
 - `triggers.crons = ["*/5 * * * *"]`
 - `GEOSITE_BUCKET` R2 binding
 
