@@ -24,6 +24,8 @@ out-sample/
 # Workspace package outputs
 packages/*/dist/
 packages/panel/.astro/
+packages/panel/.svelte-kit/
+packages/panel/.wrangler/
 
 # Cloudflare Wrangler local state
 .wrangler/
