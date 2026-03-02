@@ -1,7 +1,7 @@
 import { buildRulesPublicPath } from '$lib/panel/api';
 import { SSR_INITIAL_LIST_LIMIT } from '$lib/panel/constants';
 import { t } from '$lib/panel/i18n';
-import { countRuleLines } from '$lib/panel/utils';
+import { countRuleLines, normalizeEtag } from '$lib/panel/utils';
 
 import type { GeositeIndex, PanelLocale, PanelMode } from '$lib/panel/types';
 import type { PageServerLoad } from './$types';
@@ -13,7 +13,7 @@ const INDEX_REVALIDATE_INTERVAL_MS = 20_000;
 type IndexCacheEntry = {
 	fullIndex: GeositeIndex;
 	names: string[];
-	etag: string;
+	upstreamEtag: string;
 };
 
 type RulesCacheEntry = {
@@ -38,7 +38,7 @@ function pruneRulesCache(): void {
 	}
 }
 
-function getUpstreamEtag(headers: Headers): string {
+function getUpstreamEtagRaw(headers: Headers): string {
 	return headers.get('x-upstream-etag') ?? headers.get('etag') ?? '-';
 }
 
@@ -54,12 +54,12 @@ async function fetchIndexFresh(fetchFn: typeof fetch): Promise<IndexCacheEntry> 
 
 	const fullIndex = (await response.json()) as GeositeIndex;
 	const names = Object.keys(fullIndex).sort();
-	const etag = getUpstreamEtag(response.headers);
+	const upstreamEtag = getUpstreamEtagRaw(response.headers);
 
 	const next: IndexCacheEntry = {
 		fullIndex,
 		names,
-		etag
+		upstreamEtag
 	};
 	indexCache = next;
 	return next;
@@ -80,7 +80,7 @@ async function maybeRevalidateIndex(fetchFn: typeof fetch): Promise<void> {
 		const response = await fetchFn('/geosite', {
 			headers: {
 				accept: 'application/json',
-				'if-none-match': indexCache.etag
+					'if-none-match': indexCache.upstreamEtag
 			}
 		});
 		if (response.status === 304) {
@@ -94,7 +94,7 @@ async function maybeRevalidateIndex(fetchFn: typeof fetch): Promise<void> {
 		indexCache = {
 			fullIndex,
 			names: Object.keys(fullIndex).sort(),
-			etag: getUpstreamEtag(response.headers)
+			upstreamEtag: getUpstreamEtagRaw(response.headers)
 		};
 	} catch {
 		// Keep serving existing cache on revalidation failures.
@@ -146,7 +146,7 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
 			index = initialIndex;
 
 			rawLink = buildRulesPublicPath(DEFAULT_MODE, selected, null);
-			const rulesKey = `${currentIndex.etag}:${DEFAULT_MODE}:${selected}`;
+			const rulesKey = `${currentIndex.upstreamEtag}:${DEFAULT_MODE}:${selected}`;
 			const cachedRules = rulesCache.get(rulesKey);
 
 			if (cachedRules) {
@@ -162,7 +162,8 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
 				});
 				const rulesText = await rulesResponse.text();
 
-				etag = rulesResponse.headers.get('x-upstream-etag') ?? currentIndex.etag;
+				const upstreamEtag = rulesResponse.headers.get('x-upstream-etag') ?? currentIndex.upstreamEtag;
+				etag = normalizeEtag(upstreamEtag);
 				stale = rulesResponse.headers.get('x-stale') === '1' ? tr('yes') : tr('no');
 				if (!rulesResponse.ok) {
 					previewText = `${rulesResponse.status} ${rulesResponse.statusText}\n${rulesText}`.trim();
@@ -171,7 +172,7 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
 					ruleLines = String(countRuleLines(rulesText));
 					rulesCache.set(rulesKey, {
 						text: rulesText,
-						etag,
+						etag: normalizeEtag(upstreamEtag),
 						stale: rulesResponse.headers.get('x-stale') === '1',
 						ruleLines
 					});
