@@ -13,6 +13,9 @@ const DEFAULT_UPSTREAM_USER_AGENT = "surge-geosite-worker/2";
 const DEFAULT_SRS_UPSTREAM_BASE_URL = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set";
 const DEFAULT_SRS_UPSTREAM_USER_AGENT = "surge-geosite-worker/2";
 const DEFAULT_SRS_CACHE_TTL_SECONDS = 86400;
+const DEFAULT_MRS_UPSTREAM_BASE_URL = "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite";
+const DEFAULT_MRS_UPSTREAM_USER_AGENT = "surge-geosite-worker/2";
+const DEFAULT_MRS_CACHE_TTL_SECONDS = 86400;
 const LATEST_STATE_KEY = "state/latest.json";
 const SNAPSHOT_CACHE_LIMIT = 2;
 const RESOLVED_CACHE_LIMIT = 2;
@@ -55,6 +58,9 @@ export interface WorkerEnv {
   SRS_UPSTREAM_BASE_URL?: string;
   SRS_UPSTREAM_USER_AGENT?: string;
   SRS_CACHE_TTL_SECONDS?: string;
+  MRS_UPSTREAM_BASE_URL?: string;
+  MRS_UPSTREAM_USER_AGENT?: string;
+  MRS_CACHE_TTL_SECONDS?: string;
 }
 
 export interface ScheduledEventLike {
@@ -335,6 +341,20 @@ async function handleFetch(
     return handleGeositeSrs(request, decoded, env, deps, ctx);
   }
 
+  if (path === "/geosite-mrs") {
+    return text(400, "missing list name");
+  }
+
+  if (path.startsWith("/geosite-mrs/")) {
+    const suffix = path.slice("/geosite-mrs/".length);
+    const decoded = safeDecodeURIComponent(suffix);
+    if (decoded === null) {
+      return text(400, "invalid path encoding");
+    }
+
+    return handleGeositeMrs(request, decoded, env, deps, ctx);
+  }
+
   if (!path.startsWith("/geosite/")) {
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);
@@ -404,6 +424,54 @@ async function handleGeositeSrs(
 
   if (!result.found) {
     return text(404, `srs not found: ${listName}`);
+  }
+
+  const headers = srsResponseHeaders(result, listName);
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), result.responseEtag)) {
+    return notModified(headers);
+  }
+
+  return new Response(asResponseBody(result.body), {
+    status: 200,
+    headers
+  });
+}
+
+async function handleGeositeMrs(
+  request: Request,
+  listNameRaw: string,
+  env: WorkerEnv,
+  deps: { now: () => number; fetchImpl: typeof fetch },
+  ctx: ExecutionContextLike
+): Promise<Response> {
+  const listName = listNameRaw.trim().toLowerCase();
+  if (!isValidListName(listName)) {
+    return text(400, "invalid name");
+  }
+
+  const fileName = `${listName}.mrs`;
+  const baseUrl = trimTrailingSlash(env.MRS_UPSTREAM_BASE_URL ?? DEFAULT_MRS_UPSTREAM_BASE_URL);
+  const upstreamUrl = `${baseUrl}/${fileName}`;
+  const ttlSeconds = parsePositiveInt(env.MRS_CACHE_TTL_SECONDS, DEFAULT_MRS_CACHE_TTL_SECONDS);
+  const userAgent = env.MRS_UPSTREAM_USER_AGENT ?? DEFAULT_MRS_UPSTREAM_USER_AGENT;
+
+  const result = await readThroughRemoteBinaryCache(env, {
+    namespace: "geosite-mrs",
+    cacheKey: fileName,
+    upstreamUrl,
+    userAgent,
+    ttlSeconds,
+    fallbackContentType: "application/octet-stream",
+    now: deps.now,
+    fetchImpl: deps.fetchImpl,
+    serveStaleWhileRevalidate: true,
+    onRevalidate: (promise) => {
+      ctx.waitUntil(promise);
+    }
+  });
+
+  if (!result.found) {
+    return text(404, `mrs not found: ${listName}`);
   }
 
   const headers = srsResponseHeaders(result, listName);

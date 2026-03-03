@@ -733,6 +733,42 @@ describe("worker fetch routes", () => {
     expect(await response.text()).toBe("srs not found: not-exists");
   });
 
+  test("caches geosite-mrs payload and serves from cache without extra upstream calls", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    const payload = strToU8("mrs-binary-payload");
+    let calls = 0;
+
+    const fetchImpl: typeof fetch = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      expect(url).toContain("/adblock.mrs");
+      calls += 1;
+      return new Response(payload, {
+        status: 200,
+        headers: {
+          etag: '"mrs-etag-v1"',
+          "content-type": "application/octet-stream"
+        }
+      });
+    };
+
+    const worker = createWorker({
+      now: () => Date.parse("2026-02-15T00:00:00.000Z"),
+      fetchImpl
+    });
+
+    const first = await worker.fetch(new Request("https://example.com/geosite-mrs/adblock"), env, new TestContext());
+    expect(first.status).toBe(200);
+    expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
+
+    const second = await worker.fetch(new Request("https://example.com/geosite-mrs/adblock"), env, new TestContext());
+    expect(second.status).toBe(200);
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(payload);
+    expect(calls).toBe(1);
+
+    expect(await bucket.get("remote-cache/geosite-mrs/blob/adblock.mrs")).not.toBeNull();
+  });
+
   test("returns 400 for invalid URL encoding", async () => {
     const bucket = new MemoryR2Bucket();
     const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
