@@ -3,6 +3,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
+	import { Check, Copy, ExternalLink } from '@lucide/svelte';
 
 	import { buildRulesApiPath, buildRulesPublicPath } from '$lib/panel/api';
 	import { SSR_INITIAL_LIST_LIMIT } from '$lib/panel/constants';
@@ -49,6 +50,8 @@
 	let loadToken = 0;
 	let lastQueryKey = '';
 	let manualDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+	let copiedQuickLinkMode: PanelMode | null = null;
+	let copiedQuickLinkTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let tr: (key: string, vars?: Record<string, string | number>) => string = (key, vars = {}) =>
 		t(locale, key, vars);
@@ -313,6 +316,26 @@
 		previewText = tr('filterInputLoading');
 	}
 
+	async function onCopyQuickLink(modeName: PanelMode, href: string) {
+		if (!browser) {
+			return;
+		}
+
+		try {
+			await navigator.clipboard.writeText(href);
+			copiedQuickLinkMode = modeName;
+
+			if (copiedQuickLinkTimer) {
+				clearTimeout(copiedQuickLinkTimer);
+			}
+			copiedQuickLinkTimer = setTimeout(() => {
+				copiedQuickLinkMode = null;
+			}, 1200);
+		} catch {
+			copiedQuickLinkMode = null;
+		}
+	}
+
 	onMount(() => {
 		if (names.length === 0 && !initError) {
 			void initIndex();
@@ -323,6 +346,9 @@
 		return () => {
 			if (manualDebounceTimer) {
 				clearTimeout(manualDebounceTimer);
+			}
+			if (copiedQuickLinkTimer) {
+				clearTimeout(copiedQuickLinkTimer);
 			}
 		};
 	});
@@ -547,14 +573,36 @@
 								<p class="text-muted-foreground">-</p>
 							{:else}
 								{#each quickLinks as item}
-									<a
-										href={item.href}
-										target="_blank"
-										rel="noreferrer"
-										class="hover:border-primary hover:text-primary block border px-2 py-1 transition-colors"
-									>
-										{item.mode}
-									</a>
+									<div class="flex items-center justify-between border px-2 py-1">
+										<span class="font-mono">{item.mode}</span>
+										<div class="flex items-center gap-1">
+											<Button
+												type="button"
+												size="icon-sm"
+												variant="outline"
+												class="h-6 w-6"
+												aria-label={`${copiedQuickLinkMode === item.mode ? tr('quickCopied') : tr('quickCopy')} ${item.mode}`}
+												onclick={() => onCopyQuickLink(item.mode, item.href)}
+											>
+												{#if copiedQuickLinkMode === item.mode}
+													<Check class="size-3.5" />
+												{:else}
+													<Copy class="size-3.5" />
+												{/if}
+											</Button>
+											<Button
+												href={item.href}
+												target="_blank"
+												rel="noreferrer"
+												size="icon-sm"
+												variant="outline"
+												class="h-6 w-6"
+												aria-label={`${tr('quickOpen')} ${item.mode}`}
+											>
+												<ExternalLink class="size-3.5" />
+											</Button>
+										</div>
+									</div>
 								{/each}
 							{/if}
 						</div>
