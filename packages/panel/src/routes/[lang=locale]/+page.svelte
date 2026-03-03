@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
-	import { Check, Copy, ExternalLink } from '@lucide/svelte';
+	import { Check, Copy, Download, ExternalLink } from '@lucide/svelte';
 
 	import { buildRulesApiPath, buildRulesPublicPath } from '$lib/panel/api';
 	import { SSR_INITIAL_LIST_LIMIT } from '$lib/panel/constants';
@@ -50,7 +50,7 @@
 	let loadToken = 0;
 	let lastQueryKey = '';
 	let manualDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-	let copiedQuickLinkMode: PanelMode | null = null;
+	let copiedLinkKey: string | null = null;
 	let copiedQuickLinkTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let tr: (key: string, vars?: Record<string, string | number>) => string = (key, vars = {}) =>
@@ -123,6 +123,25 @@
 			mode: item,
 			href: buildRulesPublicPath(item, selected as string, liveFilter)
 		}));
+	})();
+	$: moreLinks = (() => {
+		if (!selected) {
+			return [] as Array<{ key: string; label: string; href: string }>;
+		}
+
+		const normalized = selected.trim().toLowerCase();
+		return [
+			{
+				key: 'singbox-srs',
+				label: tr('singboxSrs'),
+				href: `${SITE_ORIGIN}/geosite-srs/${encodeURIComponent(normalized)}`
+			},
+			{
+				key: 'mihono-mrs',
+				label: tr('mihonoMrs'),
+				href: `${SITE_ORIGIN}/geosite-mrs/${encodeURIComponent(normalized)}`
+			}
+		];
 	})();
 
 	$: if (initError) {
@@ -316,23 +335,23 @@
 		previewText = tr('filterInputLoading');
 	}
 
-	async function onCopyQuickLink(modeName: PanelMode, href: string) {
+	async function onCopyLink(key: string, href: string) {
 		if (!browser) {
 			return;
 		}
 
 		try {
 			await navigator.clipboard.writeText(href);
-			copiedQuickLinkMode = modeName;
+			copiedLinkKey = key;
 
 			if (copiedQuickLinkTimer) {
 				clearTimeout(copiedQuickLinkTimer);
 			}
 			copiedQuickLinkTimer = setTimeout(() => {
-				copiedQuickLinkMode = null;
+				copiedLinkKey = null;
 			}, 1200);
 		} catch {
-			copiedQuickLinkMode = null;
+			copiedLinkKey = null;
 		}
 	}
 
@@ -581,10 +600,10 @@
 												size="icon-sm"
 												variant="outline"
 												class="h-6 w-6"
-												aria-label={`${copiedQuickLinkMode === item.mode ? tr('quickCopied') : tr('quickCopy')} ${item.mode}`}
-												onclick={() => onCopyQuickLink(item.mode, item.href)}
+												aria-label={`${copiedLinkKey === `quick:${item.mode}` ? tr('quickCopied') : tr('quickCopy')} ${item.mode}`}
+												onclick={() => onCopyLink(`quick:${item.mode}`, item.href)}
 											>
-												{#if copiedQuickLinkMode === item.mode}
+												{#if copiedLinkKey === `quick:${item.mode}`}
 													<Check class="size-3.5" />
 												{:else}
 													<Copy class="size-3.5" />
@@ -604,11 +623,55 @@
 										</div>
 									</div>
 								{/each}
-							{/if}
-						</div>
-					</section>
-				</aside>
-			</CardContent>
-		</Card>
-	</section>
+								{/if}
+							</div>
+						</section>
+
+						<Separator />
+
+						<section>
+							<h4 class="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.14em]">{tr('more')}</h4>
+							<div class="space-y-1 text-xs">
+								{#if moreLinks.length === 0}
+									<p class="text-muted-foreground">-</p>
+								{:else}
+									{#each moreLinks as item}
+										<div class="flex items-center justify-between border px-2 py-1">
+											<span class="font-mono">{item.label}</span>
+											<div class="flex items-center gap-1">
+												<Button
+													type="button"
+													size="icon-sm"
+													variant="outline"
+													class="h-6 w-6"
+													aria-label={`${copiedLinkKey === `more:${item.key}` ? tr('quickCopied') : tr('quickCopy')} ${item.label}`}
+													onclick={() => onCopyLink(`more:${item.key}`, item.href)}
+												>
+													{#if copiedLinkKey === `more:${item.key}`}
+														<Check class="size-3.5" />
+													{:else}
+														<Copy class="size-3.5" />
+													{/if}
+												</Button>
+												<Button
+													href={item.href}
+													target="_blank"
+													rel="noreferrer"
+													size="icon-sm"
+													variant="outline"
+													class="h-6 w-6"
+													aria-label={`${tr('quickDownload')} ${item.label}`}
+												>
+													<Download class="size-3.5" />
+												</Button>
+											</div>
+										</div>
+									{/each}
+								{/if}
+							</div>
+						</section>
+					</aside>
+				</CardContent>
+			</Card>
+		</section>
 </main>
