@@ -10,6 +10,9 @@ import { gunzipSync, gzipSync, strFromU8, strToU8, unzipSync } from "fflate";
 
 const DEFAULT_UPSTREAM_ZIP_URL = "https://github.com/v2fly/domain-list-community/archive/refs/heads/master.zip";
 const DEFAULT_UPSTREAM_USER_AGENT = "surge-geosite-worker/2";
+const DEFAULT_SRS_UPSTREAM_BASE_URL = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set";
+const DEFAULT_SRS_UPSTREAM_USER_AGENT = "surge-geosite-worker/2";
+const DEFAULT_SRS_CACHE_TTL_SECONDS = 86400;
 const LATEST_STATE_KEY = "state/latest.json";
 const SNAPSHOT_CACHE_LIMIT = 2;
 const RESOLVED_CACHE_LIMIT = 2;
@@ -20,6 +23,7 @@ const VALID_ATTR_NAME = /^[a-z0-9!-]+$/;
 const snapshotCache = new Map<string, Promise<SnapshotPayload>>();
 const resolvedCache = new Map<string, Promise<Record<string, ResolvedList>>>();
 const artifactBuildLocks = new Map<string, Promise<ArtifactBuildResult>>();
+const remoteBinaryCacheLocks = new Map<string, Promise<ReadThroughRemoteBinaryResult>>();
 
 export interface R2ObjectBodyLike {
   text(): Promise<string>;
@@ -36,6 +40,7 @@ export interface R2PutOptionsLike {
 export interface R2BucketLike {
   get(key: string): Promise<R2ObjectBodyLike | null>;
   put(key: string, value: string | ArrayBuffer | Uint8Array, options?: R2PutOptionsLike): Promise<void>;
+  delete?(key: string): Promise<void>;
 }
 
 export interface AssetsBindingLike {
@@ -47,6 +52,9 @@ export interface WorkerEnv {
   ASSETS?: AssetsBindingLike;
   UPSTREAM_ZIP_URL?: string;
   UPSTREAM_USER_AGENT?: string;
+  SRS_UPSTREAM_BASE_URL?: string;
+  SRS_UPSTREAM_USER_AGENT?: string;
+  SRS_CACHE_TTL_SECONDS?: string;
 }
 
 export interface ScheduledEventLike {
@@ -109,16 +117,50 @@ interface ArtifactBuildResult {
   availableFilters: string[];
 }
 
+interface RemoteBinaryCacheMeta {
+  version: 1;
+  sourceEtag: string | null;
+  responseEtag: string;
+  fetchedAt: string;
+  contentType: string;
+}
+
+interface ReadThroughRemoteBinaryOptions {
+  namespace: string;
+  cacheKey: string;
+  upstreamUrl: string;
+  userAgent: string;
+  ttlSeconds: number;
+  fallbackContentType: string;
+  now: () => number;
+  fetchImpl: typeof fetch;
+  serveStaleWhileRevalidate?: boolean;
+  onRevalidate?: (promise: Promise<unknown>) => void;
+}
+
+type ReadThroughRemoteBinaryResult =
+  | { found: false }
+  | {
+      found: true;
+      body: Uint8Array;
+      responseEtag: string;
+      sourceEtag: string | null;
+      contentType: string;
+      stale: boolean;
+    };
+
+type RemoteBinaryFoundResult = Extract<ReadThroughRemoteBinaryResult, { found: true }>;
+
 export function createWorker(deps: WorkerDeps = {}): {
   fetch(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response>;
   scheduled(event: ScheduledEventLike, env: WorkerEnv, ctx: ExecutionContextLike): Promise<void>;
 } {
   const now = deps.now ?? (() => Date.now());
-  const fetchImpl = deps.fetchImpl ?? fetch;
+  const fetchImpl = resolveFetchImpl(deps.fetchImpl);
 
   return {
     async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response> {
-      return handleFetch(request, env, ctx);
+      return handleFetch(request, env, ctx, { now, fetchImpl });
     },
 
     async scheduled(_event: ScheduledEventLike, env: WorkerEnv, _ctx: ExecutionContextLike): Promise<void> {
@@ -129,7 +171,7 @@ export function createWorker(deps: WorkerDeps = {}): {
 
 export async function refreshGeositeRun(env: WorkerEnv, deps: WorkerDeps = {}): Promise<RefreshResult> {
   const now = deps.now ?? (() => Date.now());
-  const fetchImpl = deps.fetchImpl ?? fetch;
+  const fetchImpl = resolveFetchImpl(deps.fetchImpl);
   const checkedAt = new Date(now()).toISOString();
   const zipUrl = env.UPSTREAM_ZIP_URL ?? DEFAULT_UPSTREAM_ZIP_URL;
   const userAgent = env.UPSTREAM_USER_AGENT ?? DEFAULT_UPSTREAM_USER_AGENT;
@@ -262,7 +304,12 @@ export async function refreshGeositeRun(env: WorkerEnv, deps: WorkerDeps = {}): 
   };
 }
 
-async function handleFetch(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response> {
+async function handleFetch(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContextLike,
+  deps: { now: () => number; fetchImpl: typeof fetch }
+): Promise<Response> {
   if (request.method !== "GET") {
     return text(405, "method not allowed");
   }
@@ -272,6 +319,20 @@ async function handleFetch(request: Request, env: WorkerEnv, ctx: ExecutionConte
 
   if (path === "/geosite") {
     return handleGeositeIndex(request, env, ctx);
+  }
+
+  if (path === "/geosite-srs") {
+    return text(400, "missing list name");
+  }
+
+  if (path.startsWith("/geosite-srs/")) {
+    const suffix = path.slice("/geosite-srs/".length);
+    const decoded = safeDecodeURIComponent(suffix);
+    if (decoded === null) {
+      return text(400, "invalid path encoding");
+    }
+
+    return handleGeositeSrs(request, decoded, env, deps, ctx);
   }
 
   if (!path.startsWith("/geosite/")) {
@@ -306,6 +367,54 @@ async function handleFetch(request: Request, env: WorkerEnv, ctx: ExecutionConte
   }
 
   return handleGeositeRules(request, mode, nameWithFilter, env, ctx);
+}
+
+async function handleGeositeSrs(
+  request: Request,
+  listNameRaw: string,
+  env: WorkerEnv,
+  deps: { now: () => number; fetchImpl: typeof fetch },
+  ctx: ExecutionContextLike
+): Promise<Response> {
+  const listName = listNameRaw.trim().toLowerCase();
+  if (!isValidListName(listName)) {
+    return text(400, "invalid name");
+  }
+
+  const fileName = `geosite-${listName}.srs`;
+  const baseUrl = trimTrailingSlash(env.SRS_UPSTREAM_BASE_URL ?? DEFAULT_SRS_UPSTREAM_BASE_URL);
+  const upstreamUrl = `${baseUrl}/${fileName}`;
+  const ttlSeconds = parsePositiveInt(env.SRS_CACHE_TTL_SECONDS, DEFAULT_SRS_CACHE_TTL_SECONDS);
+  const userAgent = env.SRS_UPSTREAM_USER_AGENT ?? DEFAULT_SRS_UPSTREAM_USER_AGENT;
+
+  const result = await readThroughRemoteBinaryCache(env, {
+    namespace: "geosite-srs",
+    cacheKey: fileName,
+    upstreamUrl,
+    userAgent,
+    ttlSeconds,
+    fallbackContentType: "application/octet-stream",
+    now: deps.now,
+    fetchImpl: deps.fetchImpl,
+    serveStaleWhileRevalidate: true,
+    onRevalidate: (promise) => {
+      ctx.waitUntil(promise);
+    }
+  });
+
+  if (!result.found) {
+    return text(404, `srs not found: ${listName}`);
+  }
+
+  const headers = srsResponseHeaders(result, listName);
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), result.responseEtag)) {
+    return notModified(headers);
+  }
+
+  return new Response(asResponseBody(result.body), {
+    status: 200,
+    headers
+  });
 }
 
 async function handleGeositeIndex(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response> {
@@ -445,6 +554,197 @@ function responseHeaders(
     ...(filter ? { "x-filter": filter } : {}),
     ...(stale ? { "x-stale": "1" } : {})
   };
+}
+
+function srsResponseHeaders(
+  result: Extract<ReadThroughRemoteBinaryResult, { found: true }>,
+  listName: string
+): Record<string, string> {
+  return {
+    "content-type": result.contentType,
+    "cache-control": result.stale
+      ? "public, max-age=60, s-maxage=120, stale-while-revalidate=900"
+      : "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
+    etag: result.responseEtag,
+    "x-list": listName,
+    ...(result.sourceEtag ? { "x-upstream-etag": result.sourceEtag } : {}),
+    ...(result.stale ? { "x-stale": "1" } : {})
+  };
+}
+
+async function readThroughRemoteBinaryCache(
+  env: WorkerEnv,
+  options: ReadThroughRemoteBinaryOptions
+): Promise<ReadThroughRemoteBinaryResult> {
+  const blobKey = remoteBlobKey(options.namespace, options.cacheKey);
+  const metaKey = remoteMetaKey(options.namespace, options.cacheKey);
+
+  const [cachedObject, cachedMetaRaw] = await Promise.all([
+    env.GEOSITE_BUCKET.get(blobKey),
+    readJson<RemoteBinaryCacheMeta>(env.GEOSITE_BUCKET, metaKey)
+  ]);
+
+  const cachedBody = cachedObject ? new Uint8Array(await cachedObject.arrayBuffer()) : null;
+  const cachedMeta = await normalizeRemoteBinaryCacheMeta(
+    cachedMetaRaw,
+    options.namespace,
+    options.cacheKey,
+    cachedBody,
+    options.fallbackContentType
+  );
+  const cached = cachedBody && cachedMeta ? { body: cachedBody, meta: cachedMeta } : null;
+
+  const nowMs = options.now();
+  const ttlMs = options.ttlSeconds * 1000;
+  if (cached && isFreshAt(cached.meta.fetchedAt, ttlMs, nowMs)) {
+    return remoteBinaryFound({
+      body: cached.body,
+      responseEtag: cached.meta.responseEtag,
+      sourceEtag: cached.meta.sourceEtag,
+      contentType: cached.meta.contentType,
+      stale: false
+    });
+  }
+
+  if (cached && options.serveStaleWhileRevalidate) {
+    const refresh = ensureRemoteBinaryRevalidated(env, options, cached, blobKey, metaKey)
+      .then(() => undefined)
+      .catch(() => undefined);
+    options.onRevalidate?.(refresh);
+
+    return remoteBinaryFound({
+      body: cached.body,
+      responseEtag: cached.meta.responseEtag,
+      sourceEtag: cached.meta.sourceEtag,
+      contentType: cached.meta.contentType,
+      stale: true
+    });
+  }
+
+  return ensureRemoteBinaryRevalidated(env, options, cached, blobKey, metaKey);
+}
+
+async function ensureRemoteBinaryRevalidated(
+  env: WorkerEnv,
+  options: ReadThroughRemoteBinaryOptions,
+  cached: { body: Uint8Array; meta: RemoteBinaryCacheMeta } | null,
+  blobKey: string,
+  metaKey: string
+): Promise<ReadThroughRemoteBinaryResult> {
+  const lockKey = `${options.namespace}:${options.cacheKey}`;
+  const existingLock = remoteBinaryCacheLocks.get(lockKey);
+  if (existingLock) {
+    return existingLock;
+  }
+
+  const lock: Promise<ReadThroughRemoteBinaryResult> = revalidateRemoteBinaryFromUpstream(
+    env,
+    options,
+    cached,
+    blobKey,
+    metaKey
+  ).finally(() => {
+    remoteBinaryCacheLocks.delete(lockKey);
+  });
+
+  remoteBinaryCacheLocks.set(lockKey, lock);
+  return lock;
+}
+
+async function revalidateRemoteBinaryFromUpstream(
+  env: WorkerEnv,
+  options: ReadThroughRemoteBinaryOptions,
+  cached: { body: Uint8Array; meta: RemoteBinaryCacheMeta } | null,
+  blobKey: string,
+  metaKey: string
+): Promise<ReadThroughRemoteBinaryResult> {
+  const requestHeaders: Record<string, string> = {
+    "user-agent": options.userAgent
+  };
+  if (cached?.meta.sourceEtag) {
+    requestHeaders["if-none-match"] = cached.meta.sourceEtag;
+  }
+
+  const nowIso = new Date(options.now()).toISOString();
+
+  try {
+    const upstreamResponse = await options.fetchImpl(options.upstreamUrl, {
+      headers: requestHeaders
+    });
+
+    if (upstreamResponse.status === 304 && cached) {
+      const refreshedMeta: RemoteBinaryCacheMeta = {
+        ...cached.meta,
+        fetchedAt: nowIso
+      };
+      await writeJson(env.GEOSITE_BUCKET, metaKey, refreshedMeta);
+      return remoteBinaryFound({
+        body: cached.body,
+        responseEtag: refreshedMeta.responseEtag,
+        sourceEtag: refreshedMeta.sourceEtag,
+        contentType: refreshedMeta.contentType,
+        stale: false
+      });
+    }
+
+    if (upstreamResponse.status === 404) {
+      await deleteRemoteCacheEntry(env.GEOSITE_BUCKET, blobKey, metaKey);
+      return remoteBinaryNotFound();
+    }
+
+    if (!upstreamResponse.ok) {
+      if (cached) {
+        return remoteBinaryFound({
+          body: cached.body,
+          responseEtag: cached.meta.responseEtag,
+          sourceEtag: cached.meta.sourceEtag,
+          contentType: cached.meta.contentType,
+          stale: true
+        });
+      }
+      throw new Error(`failed to fetch remote binary: ${upstreamResponse.status} ${upstreamResponse.statusText}`);
+    }
+
+    const contentType = upstreamResponse.headers.get("content-type") ?? options.fallbackContentType;
+    const sourceEtag = normalizeEtag(upstreamResponse.headers.get("etag"));
+    const body = new Uint8Array(await upstreamResponse.arrayBuffer());
+    const responseEtag = await buildRemoteBinaryEtag(options.namespace, options.cacheKey, sourceEtag, body);
+
+    const nextMeta: RemoteBinaryCacheMeta = {
+      version: 1,
+      sourceEtag,
+      responseEtag,
+      fetchedAt: nowIso,
+      contentType
+    };
+
+    await Promise.all([
+      writeBinary(env.GEOSITE_BUCKET, blobKey, body, {
+        contentType,
+        cacheControl: "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400"
+      }),
+      writeJson(env.GEOSITE_BUCKET, metaKey, nextMeta)
+    ]);
+
+    return remoteBinaryFound({
+      body,
+      responseEtag,
+      sourceEtag,
+      contentType,
+      stale: false
+    });
+  } catch (error) {
+    if (cached) {
+      return remoteBinaryFound({
+        body: cached.body,
+        responseEtag: cached.meta.responseEtag,
+        sourceEtag: cached.meta.sourceEtag,
+        contentType: cached.meta.contentType,
+        stale: true
+      });
+    }
+    throw error;
+  }
 }
 
 function buildIndexEtag(upstreamEtag: string): string {
@@ -724,6 +1024,107 @@ function snapshotIndexKey(etag: string): string {
   return `snapshots/${etag}/index/geosite.json`;
 }
 
+function remoteBlobKey(namespace: string, cacheKey: string): string {
+  return `remote-cache/${namespace}/blob/${cacheKey}`;
+}
+
+function remoteMetaKey(namespace: string, cacheKey: string): string {
+  return `remote-cache/${namespace}/meta/${cacheKey}.json`;
+}
+
+async function normalizeRemoteBinaryCacheMeta(
+  input: RemoteBinaryCacheMeta | null,
+  namespace: string,
+  cacheKey: string,
+  cachedBody: Uint8Array | null,
+  fallbackContentType: string
+): Promise<RemoteBinaryCacheMeta | null> {
+  if (
+    input &&
+    typeof input === "object" &&
+    input.version === 1 &&
+    typeof input.fetchedAt === "string" &&
+    typeof input.responseEtag === "string" &&
+    typeof input.contentType === "string"
+  ) {
+    return {
+      version: 1,
+      sourceEtag: typeof input.sourceEtag === "string" ? input.sourceEtag : null,
+      responseEtag: input.responseEtag,
+      fetchedAt: input.fetchedAt,
+      contentType: input.contentType
+    };
+  }
+
+  if (!cachedBody) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    sourceEtag: null,
+    responseEtag: await buildRemoteBinaryEtag(namespace, cacheKey, null, cachedBody),
+    fetchedAt: new Date(0).toISOString(),
+    contentType: fallbackContentType
+  };
+}
+
+function isFreshAt(fetchedAt: string, ttlMs: number, nowMs: number): boolean {
+  if (ttlMs <= 0) {
+    return false;
+  }
+  const fetchedAtMs = Date.parse(fetchedAt);
+  if (!Number.isFinite(fetchedAtMs)) {
+    return false;
+  }
+  return nowMs - fetchedAtMs < ttlMs;
+}
+
+async function buildRemoteBinaryEtag(
+  namespace: string,
+  cacheKey: string,
+  sourceEtag: string | null,
+  body: Uint8Array
+): Promise<string> {
+  const stableToken = sourceEtag ?? (await sha256Hex(body));
+  const safeToken = stableToken.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `"${namespace}:${cacheKey}:${safeToken}"`;
+}
+
+function trimTrailingSlash(input: string): string {
+  return input.replace(/\/+$/, "");
+}
+
+function parsePositiveInt(input: string | undefined, fallback: number): number {
+  if (!input) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(input, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function remoteBinaryNotFound(): ReadThroughRemoteBinaryResult {
+  return { found: false };
+}
+
+function remoteBinaryFound(
+  input: Omit<RemoteBinaryFoundResult, "found">
+): RemoteBinaryFoundResult {
+  return {
+    found: true,
+    ...input
+  };
+}
+
+function asResponseBody(input: Uint8Array): BodyInit {
+  return input as unknown as BodyInit;
+}
+
 function isRegexMode(input: string): input is RegexMode {
   return input === "strict" || input === "balanced" || input === "full";
 }
@@ -802,6 +1203,23 @@ async function writeBinary(
   await bucket.put(key, value, {
     httpMetadata: metadata
   });
+}
+
+async function deleteRemoteCacheEntry(bucket: R2BucketLike, blobKey: string, metaKey: string): Promise<void> {
+  if (!bucket.delete) {
+    return;
+  }
+
+  const deleteFromBucket = bucket.delete.bind(bucket);
+  await Promise.all([deleteFromBucket(blobKey), deleteFromBucket(metaKey)]);
+}
+
+function resolveFetchImpl(input?: typeof fetch): typeof fetch {
+  if (input) {
+    return input;
+  }
+
+  return (request: RequestInfo | URL, init?: RequestInit): Promise<Response> => fetch(request, init);
 }
 
 function pruneMap<T>(map: Map<string, T>, keep: number): void {

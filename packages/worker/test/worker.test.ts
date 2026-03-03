@@ -45,6 +45,10 @@ class MemoryR2Bucket implements R2BucketLike {
     this.store.set(key, new Uint8Array(value));
   }
 
+  async delete(key: string): Promise<void> {
+    this.store.delete(key);
+  }
+
   async putJson(key: string, value: unknown): Promise<void> {
     await this.put(key, `${JSON.stringify(value)}\n`);
   }
@@ -587,6 +591,146 @@ describe("worker fetch routes", () => {
     const response = await worker.fetch(new Request("https://example.com/geosite/google"), env, new TestContext());
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("DOMAIN-SUFFIX,google.com");
+  });
+
+  test("caches geosite-srs payload and serves from cache without extra upstream calls", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    const payload = strToU8("srs-binary-payload");
+    let calls = 0;
+
+    const fetchImpl: typeof fetch = async (_input: RequestInfo | URL): Promise<Response> => {
+      calls += 1;
+      return new Response(payload, {
+        status: 200,
+        headers: {
+          etag: '"srs-etag-v1"',
+          "content-type": "application/octet-stream"
+        }
+      });
+    };
+
+    const worker = createWorker({
+      now: () => Date.parse("2026-02-15T00:00:00.000Z"),
+      fetchImpl
+    });
+
+    const first = await worker.fetch(new Request("https://example.com/geosite-srs/apple"), env, new TestContext());
+    expect(first.status).toBe(200);
+    expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
+
+    const second = await worker.fetch(new Request("https://example.com/geosite-srs/apple"), env, new TestContext());
+    expect(second.status).toBe(200);
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(payload);
+    expect(calls).toBe(1);
+  });
+
+  test("returns stale geosite-srs cache when upstream refresh fails", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = {
+      GEOSITE_BUCKET: bucket,
+      SRS_CACHE_TTL_SECONDS: "1"
+    };
+    const payload = strToU8("srs-old");
+    let calls = 0;
+    let nowMs = Date.parse("2026-02-15T00:00:00.000Z");
+
+    const fetchImpl: typeof fetch = async (_input: RequestInfo | URL): Promise<Response> => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(payload, {
+          status: 200,
+          headers: {
+            etag: '"srs-etag-v1"',
+            "content-type": "application/octet-stream"
+          }
+        });
+      }
+
+      return new Response("upstream error", {
+        status: 500
+      });
+    };
+
+    const worker = createWorker({
+      now: () => nowMs,
+      fetchImpl
+    });
+
+    const first = await worker.fetch(new Request("https://example.com/geosite-srs/apple"), env, new TestContext());
+    expect(first.status).toBe(200);
+    expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
+
+    nowMs += 2000;
+    const second = await worker.fetch(new Request("https://example.com/geosite-srs/apple"), env, new TestContext());
+    expect(second.status).toBe(200);
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(payload);
+    expect(second.headers.get("x-stale")).toBe("1");
+    expect(calls).toBe(2);
+  });
+
+  test("purges geosite-srs cache on upstream 404 after stale response", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = {
+      GEOSITE_BUCKET: bucket,
+      SRS_CACHE_TTL_SECONDS: "1"
+    };
+    const payload = strToU8("srs-old");
+    let calls = 0;
+    let nowMs = Date.parse("2026-02-15T00:00:00.000Z");
+
+    const fetchImpl: typeof fetch = async (): Promise<Response> => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(payload, {
+          status: 200,
+          headers: {
+            etag: '"srs-etag-v1"',
+            "content-type": "application/octet-stream"
+          }
+        });
+      }
+      return new Response(null, { status: 404 });
+    };
+
+    const worker = createWorker({
+      now: () => nowMs,
+      fetchImpl
+    });
+
+    const firstCtx = new TestContext();
+    const first = await worker.fetch(new Request("https://example.com/geosite-srs/apple"), env, firstCtx);
+    expect(first.status).toBe(200);
+    expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
+
+    nowMs += 2000;
+    const staleCtx = new TestContext();
+    const second = await worker.fetch(new Request("https://example.com/geosite-srs/apple"), env, staleCtx);
+    expect(second.status).toBe(200);
+    expect(second.headers.get("x-stale")).toBe("1");
+    await staleCtx.drain();
+
+    expect(await bucket.get("remote-cache/geosite-srs/blob/geosite-apple.srs")).toBeNull();
+    expect(await bucket.get("remote-cache/geosite-srs/meta/geosite-apple.srs.json")).toBeNull();
+
+    nowMs += 1000;
+    const third = await worker.fetch(new Request("https://example.com/geosite-srs/apple"), env, new TestContext());
+    expect(third.status).toBe(404);
+    expect(await third.text()).toBe("srs not found: apple");
+    expect(calls).toBe(3);
+  });
+
+  test("returns 404 when geosite-srs list does not exist upstream", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    const fetchImpl: typeof fetch = async (): Promise<Response> => {
+      return new Response(null, { status: 404 });
+    };
+
+    const worker = createWorker({ fetchImpl });
+    const response = await worker.fetch(new Request("https://example.com/geosite-srs/not-exists"), env, new TestContext());
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("srs not found: not-exists");
   });
 
   test("returns 400 for invalid URL encoding", async () => {
