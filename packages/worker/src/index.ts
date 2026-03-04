@@ -453,11 +453,12 @@ async function handleGeositeSrs(
     return text(400, "invalid name");
   }
 
-  const fileName = `geosite-${listName}.srs`;
+  const upstreamFileName = `geosite-${listName}.srs`;
+  const downloadFileName = `${listName}.srs`;
   const baseUrl = trimTrailingSlash(
     env.SRS_UPSTREAM_BASE_URL ?? DEFAULT_SRS_UPSTREAM_BASE_URL,
   );
-  const upstreamUrl = `${baseUrl}/${fileName}`;
+  const upstreamUrl = `${baseUrl}/${upstreamFileName}`;
   const ttlSeconds = parsePositiveInt(
     env.SRS_CACHE_TTL_SECONDS,
     DEFAULT_SRS_CACHE_TTL_SECONDS,
@@ -467,7 +468,7 @@ async function handleGeositeSrs(
 
   const result = await readThroughRemoteBinaryCache(env, {
     namespace: "geosite-srs",
-    cacheKey: fileName,
+    cacheKey: upstreamFileName,
     upstreamUrl,
     userAgent,
     ttlSeconds,
@@ -484,7 +485,7 @@ async function handleGeositeSrs(
     return text(404, `srs not found: ${listName}`);
   }
 
-  const headers = srsResponseHeaders(result, listName, fileName);
+  const headers = srsResponseHeaders(result, listName, downloadFileName);
   if (
     matchesIfNoneMatch(
       request.headers.get("if-none-match"),

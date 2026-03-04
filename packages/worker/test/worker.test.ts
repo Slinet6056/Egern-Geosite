@@ -952,7 +952,7 @@ describe("worker fetch routes", () => {
     );
     expect(first.status).toBe(200);
     expect(first.headers.get("content-disposition")).toBe(
-      'attachment; filename="geosite-apple.srs"',
+      'attachment; filename="apple.srs"',
     );
     expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
 
