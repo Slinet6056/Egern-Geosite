@@ -578,6 +578,12 @@ describe("worker fetch routes", () => {
       ctx,
     );
     expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/yaml; charset=utf-8",
+    );
+    expect(response.headers.get("content-disposition")).toBe(
+      'inline; filename="google.yaml"',
+    );
     const body = await response.text();
     expect(body).toContain("domain_suffix_set:");
     expect(body).toContain('"google.com"');
@@ -589,6 +595,51 @@ describe("worker fetch routes", () => {
     expect(cached).not.toBeNull();
 
     await ctx.drain();
+  });
+
+  test("supports .yaml suffix on geosite route", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+
+    await bucket.putJson("state/latest.json", {
+      upstream: {
+        zipUrl: "https://example.com/master.zip",
+        etag: "etag-suffix-v1",
+      },
+      snapshot: {
+        sourceKey: "snapshots/etag-suffix-v1/sources.json.gz",
+        indexKey: "snapshots/etag-suffix-v1/index/geosite.json",
+        listCount: 1,
+        generatedAt: "2026-02-15T00:00:00.000Z",
+      },
+      previousEtag: null,
+      checkedAt: "2026-02-15T00:00:00.000Z",
+    });
+
+    await bucket.put(
+      "snapshots/etag-suffix-v1/sources.json.gz",
+      makeSnapshotPayload("etag-suffix-v1", {
+        google: "domain:google.com @cn\n",
+      }),
+    );
+    await bucket.putJson("snapshots/etag-suffix-v1/index/geosite.json", {
+      google: { name: "GOOGLE", sourceFile: "google", filters: [], modes: {} },
+    });
+
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request("https://example.com/geosite/strict/google@cn.yaml"),
+      env,
+      new TestContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-mode")).toBe("strict");
+    expect(response.headers.get("x-filter")).toBe("cn");
+    expect(response.headers.get("content-disposition")).toBe(
+      'inline; filename="google@cn.yaml"',
+    );
+    expect(await response.text()).toContain('"google.com"');
   });
 
   test("returns stale artifact and refreshes latest in background", async () => {
@@ -895,11 +946,14 @@ describe("worker fetch routes", () => {
     });
 
     const first = await worker.fetch(
-      new Request("https://example.com/geosite-srs/apple"),
+      new Request("https://example.com/geosite-srs/apple.srs"),
       env,
       new TestContext(),
     );
     expect(first.status).toBe(200);
+    expect(first.headers.get("content-disposition")).toBe(
+      'attachment; filename="geosite-apple.srs"',
+    );
     expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
 
     const second = await worker.fetch(
@@ -1077,11 +1131,14 @@ describe("worker fetch routes", () => {
     });
 
     const first = await worker.fetch(
-      new Request("https://example.com/geosite-mrs/adblock"),
+      new Request("https://example.com/geosite-mrs/adblock.mrs"),
       env,
       new TestContext(),
     );
     expect(first.status).toBe(200);
+    expect(first.headers.get("content-disposition")).toBe(
+      'attachment; filename="adblock.mrs"',
+    );
     expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
 
     const second = await worker.fetch(

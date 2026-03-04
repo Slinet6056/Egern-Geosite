@@ -30,5 +30,5 @@ export function buildRulesPublicPath(
   name: string,
   filter: string | null,
 ): string {
-  return buildPath(GEOSITE_PUBLIC_BASE, mode, name, filter);
+  return `${buildPath(GEOSITE_PUBLIC_BASE, mode, name, filter)}.yaml`;
 }

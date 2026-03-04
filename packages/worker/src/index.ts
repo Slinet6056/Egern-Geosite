@@ -432,7 +432,13 @@ async function handleFetch(
     nameWithFilter = decoded;
   }
 
-  return handleGeositeRules(request, mode, nameWithFilter, env, ctx);
+  return handleGeositeRules(
+    request,
+    mode,
+    stripOptionalSuffix(nameWithFilter, ".yaml"),
+    env,
+    ctx,
+  );
 }
 
 async function handleGeositeSrs(
@@ -442,7 +448,7 @@ async function handleGeositeSrs(
   deps: { now: () => number; fetchImpl: typeof fetch },
   ctx: ExecutionContextLike,
 ): Promise<Response> {
-  const listName = listNameRaw.trim().toLowerCase();
+  const listName = stripOptionalSuffix(listNameRaw, ".srs").toLowerCase();
   if (!isValidListName(listName)) {
     return text(400, "invalid name");
   }
@@ -478,7 +484,7 @@ async function handleGeositeSrs(
     return text(404, `srs not found: ${listName}`);
   }
 
-  const headers = srsResponseHeaders(result, listName);
+  const headers = srsResponseHeaders(result, listName, fileName);
   if (
     matchesIfNoneMatch(
       request.headers.get("if-none-match"),
@@ -501,7 +507,7 @@ async function handleGeositeMrs(
   deps: { now: () => number; fetchImpl: typeof fetch },
   ctx: ExecutionContextLike,
 ): Promise<Response> {
-  const listName = listNameRaw.trim().toLowerCase();
+  const listName = stripOptionalSuffix(listNameRaw, ".mrs").toLowerCase();
   if (!isValidListName(listName)) {
     return text(400, "invalid name");
   }
@@ -537,7 +543,7 @@ async function handleGeositeMrs(
     return text(404, `mrs not found: ${listName}`);
   }
 
-  const headers = srsResponseHeaders(result, listName);
+  const headers = srsResponseHeaders(result, listName, fileName);
   if (
     matchesIfNoneMatch(
       request.headers.get("if-none-match"),
@@ -728,6 +734,19 @@ function splitNameFilter(input: string): {
   };
 }
 
+function stripOptionalSuffix(input: string, suffix: string): string {
+  const trimmed = input.trim();
+  if (trimmed.toLowerCase().endsWith(suffix.toLowerCase())) {
+    return trimmed.slice(0, -suffix.length);
+  }
+  return trimmed;
+}
+
+function buildRulesFileName(name: string, filter: string | null): string {
+  const normalizedName = name.toLowerCase();
+  return `${filter ? `${normalizedName}@${filter}` : normalizedName}.yaml`;
+}
+
 function responseHeaders(
   etag: string,
   mode: RegexMode,
@@ -736,8 +755,10 @@ function responseHeaders(
   stale: boolean,
 ): Record<string, string> {
   const responseEtag = buildRulesEtag(etag, mode, name, filter);
+  const fileName = buildRulesFileName(name, filter);
   return {
-    "content-type": "application/yaml; charset=utf-8",
+    "content-type": "text/yaml; charset=utf-8",
+    "content-disposition": `inline; filename="${fileName}"`,
     "cache-control": stale
       ? "public, max-age=60, s-maxage=120, stale-while-revalidate=900"
       : "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
@@ -753,9 +774,11 @@ function responseHeaders(
 function srsResponseHeaders(
   result: Extract<ReadThroughRemoteBinaryResult, { found: true }>,
   listName: string,
+  fileName: string,
 ): Record<string, string> {
   return {
     "content-type": result.contentType,
+    "content-disposition": `attachment; filename="${fileName}"`,
     "cache-control": result.stale
       ? "public, max-age=60, s-maxage=120, stale-while-revalidate=900"
       : "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",

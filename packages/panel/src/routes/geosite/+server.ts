@@ -13,6 +13,7 @@ export const GET: RequestHandler = async ({ request, url, platform }) => {
 
   for (const key of [
     "content-type",
+    "content-disposition",
     "cache-control",
     "etag",
     "x-upstream-etag",
