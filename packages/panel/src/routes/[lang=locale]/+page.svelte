@@ -3,7 +3,14 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
-  import { Check, Copy, Download, ExternalLink } from "@lucide/svelte";
+  import {
+    Check,
+    Copy,
+    Download,
+    ExternalLink,
+    Moon,
+    Sun,
+  } from "@lucide/svelte";
 
   import { buildRulesApiPath, buildRulesPublicPath } from "$lib/panel/api";
   import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
@@ -33,6 +40,10 @@
   const MODES: PanelMode[] = ["strict", "balanced", "full"];
   const NONE_FILTER = "__none__";
   const SITE_ORIGIN = "https://egern.slinet.moe";
+  const THEME_STORAGE_KEY = "egern-panel-theme";
+  const THEME_MEDIA_QUERY = "(prefers-color-scheme: dark)";
+
+  type ThemePreference = "system" | "light" | "dark";
 
   export let data: PageData;
 
@@ -61,12 +72,24 @@
   let manualDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let copiedLinkKey: string | null = null;
   let copiedQuickLinkTimer: ReturnType<typeof setTimeout> | null = null;
+  let themePreference: ThemePreference = "system";
+  let resolvedTheme: "light" | "dark" = "light";
+  let canPersistTheme = true;
+  let themeModeLabel = "";
+  let themeToggleAriaLabel = "";
 
   let tr: (key: string, vars?: Record<string, string | number>) => string = (
     key,
     vars = {},
   ) => t(locale, key, vars);
   $: tr = (key, vars = {}) => t(locale, key, vars);
+  $: themeModeLabel =
+    themePreference === "dark"
+      ? tr("themeDark")
+      : themePreference === "light"
+        ? tr("themeLight")
+        : tr("themeSystem");
+  $: themeToggleAriaLabel = tr("themeToggleAria", { mode: themeModeLabel });
 
   function applyServerData(next: PageData) {
     const nextLocale = next.locale as PanelLocale;
@@ -187,6 +210,58 @@
     etag = "-";
     stale = "-";
     ruleLines = "-";
+  }
+
+  function resolveTheme(preference: ThemePreference): "light" | "dark" {
+    if (preference === "system") {
+      return window.matchMedia(THEME_MEDIA_QUERY).matches ? "dark" : "light";
+    }
+    return preference;
+  }
+
+  function applyTheme(preference: ThemePreference) {
+    if (!browser) {
+      return;
+    }
+
+    resolvedTheme = resolveTheme(preference);
+    document.documentElement.classList.toggle("dark", resolvedTheme === "dark");
+  }
+
+  function setThemePreference(next: ThemePreference) {
+    themePreference = next;
+
+    if (!browser) {
+      return;
+    }
+
+    if (canPersistTheme) {
+      try {
+        if (next === "system") {
+          window.localStorage.removeItem(THEME_STORAGE_KEY);
+        } else {
+          window.localStorage.setItem(THEME_STORAGE_KEY, next);
+        }
+      } catch {
+        canPersistTheme = false;
+      }
+    }
+
+    applyTheme(next);
+  }
+
+  function cycleThemePreference() {
+    if (themePreference === "system") {
+      setThemePreference("light");
+      return;
+    }
+
+    if (themePreference === "light") {
+      setThemePreference("dark");
+      return;
+    }
+
+    setThemePreference("system");
   }
 
   async function loadRules(filter: string | null, force = false) {
@@ -375,6 +450,28 @@
   }
 
   onMount(() => {
+    const mediaQuery = window.matchMedia(THEME_MEDIA_QUERY);
+    const onMediaChange = () => {
+      if (themePreference === "system") {
+        applyTheme("system");
+      }
+    };
+
+    try {
+      const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+      if (storedTheme === "light" || storedTheme === "dark") {
+        themePreference = storedTheme;
+      } else {
+        themePreference = "system";
+      }
+    } catch {
+      themePreference = "system";
+    }
+
+    applyTheme(themePreference);
+
+    mediaQuery.addEventListener("change", onMediaChange);
+
     if (names.length === 0 && !initError) {
       void initIndex();
     } else {
@@ -388,6 +485,7 @@
       if (copiedQuickLinkTimer) {
         clearTimeout(copiedQuickLinkTimer);
       }
+      mediaQuery.removeEventListener("change", onMediaChange);
     };
   });
 </script>
@@ -440,6 +538,21 @@
               EN
             </a>
           </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            class="h-9 px-3"
+            aria-label={themeToggleAriaLabel}
+            onclick={cycleThemePreference}
+          >
+            {#if resolvedTheme === "dark"}
+              <Moon class="size-4" />
+            {:else}
+              <Sun class="size-4" />
+            {/if}
+            <span class="hidden sm:inline">{themeModeLabel}</span>
+          </Button>
           <a
             class="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-accent"
             href="https://github.com/Slinet6056/Egern-Geosite"

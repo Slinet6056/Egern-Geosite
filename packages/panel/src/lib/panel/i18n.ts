@@ -48,6 +48,10 @@ const messages = {
     filterInputLoading: "手动标签已更新，正在加载…",
     selectDataset: "请选择一个数据集。",
     github: "GitHub",
+    themeLight: "浅色",
+    themeDark: "深色",
+    themeSystem: "跟随系统",
+    themeToggleAria: "切换主题，当前：{mode}",
   },
   en: {
     appTitle: "Egern Geosite",
@@ -98,6 +102,10 @@ const messages = {
     filterInputLoading: "Manual filter updated, loading...",
     selectDataset: "Please select a dataset.",
     github: "GitHub",
+    themeLight: "Light",
+    themeDark: "Dark",
+    themeSystem: "System",
+    themeToggleAria: "Switch theme, current: {mode}",
   },
 } as const;
 
