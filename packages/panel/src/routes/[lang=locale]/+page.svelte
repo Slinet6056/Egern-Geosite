@@ -655,40 +655,42 @@
           </div>
         </div>
 
-        <div class="grid gap-3 md:grid-cols-[1fr_12rem_auto]">
-          <label class="space-y-1">
-            <span class="text-muted-foreground block text-xs font-semibold"
-              >{tr("filterTag")}</span
-            >
-            <select
-              class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-              value={selectedFilter}
-              on:change={(event) =>
-                onFilterChange(
-                  (event.currentTarget as HTMLSelectElement).value,
-                )}
-            >
-              <option value={NONE_FILTER}>{tr("noneOption")}</option>
-              {#each availableFilters as item}
-                <option value={item}>{item}</option>
-              {/each}
-            </select>
-          </label>
+        <div class="grid gap-4 lg:grid-cols-[1fr_17rem]">
+          <div class="grid gap-3 md:grid-cols-2">
+            <label class="space-y-1">
+              <span class="text-muted-foreground block text-xs font-semibold"
+                >{tr("filterTag")}</span
+              >
+              <select
+                class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                value={selectedFilter}
+                on:change={(event) =>
+                  onFilterChange(
+                    (event.currentTarget as HTMLSelectElement).value,
+                  )}
+              >
+                <option value={NONE_FILTER}>{tr("noneOption")}</option>
+                {#each availableFilters as item}
+                  <option value={item}>{item}</option>
+                {/each}
+              </select>
+            </label>
 
-          <label class="space-y-1">
-            <span class="text-muted-foreground block text-xs font-semibold"
-              >{tr("manualTag")}</span
-            >
-            <Input
-              class="font-mono"
-              placeholder={tr("manualTagPlaceholder")}
-              value={manualFilter}
-              oninput={(event) =>
-                onManualFilterInput(
-                  (event.currentTarget as HTMLInputElement).value,
-                )}
-            />
-          </label>
+            <label class="space-y-1">
+              <span class="text-muted-foreground block text-xs font-semibold"
+                >{tr("manualTag")}</span
+              >
+              <Input
+                class="font-mono"
+                placeholder={tr("manualTagPlaceholder")}
+                value={manualFilter}
+                oninput={(event) =>
+                  onManualFilterInput(
+                    (event.currentTarget as HTMLInputElement).value,
+                  )}
+              />
+            </label>
+          </div>
 
           <div class="flex items-end">
             <Button
