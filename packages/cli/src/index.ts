@@ -8,13 +8,13 @@ import {
   countFilterAttrs,
   countResolvedEntries,
   countSourceEntries,
-  emitSurgeRuleset,
+  emitEgernRuleset,
   modeStatsFromEmit,
   parseListsFromText,
   resolveAllLists,
   type ListStats,
-  type RegexMode
-} from "@surge-geosite/core";
+  type RegexMode,
+} from "@egern-geosite/core";
 
 import { getStringFlag, parseCliArgs } from "./args.js";
 import { loadListsFromDirectory } from "./fs-loader.js";
@@ -48,9 +48,14 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 }
 
-async function runBuild(flags: Record<string, string | boolean>): Promise<number> {
+async function runBuild(
+  flags: Record<string, string | boolean>,
+): Promise<number> {
   const dataDir = getStringFlag(flags, "data-dir");
-  const outDir = path.resolve(process.cwd(), getStringFlag(flags, "out-dir") ?? "out");
+  const outDir = path.resolve(
+    process.cwd(),
+    getStringFlag(flags, "out-dir") ?? "out",
+  );
   const listArg = getStringFlag(flags, "list");
 
   if (!dataDir) {
@@ -58,7 +63,9 @@ async function runBuild(flags: Record<string, string | boolean>): Promise<number
     return 1;
   }
 
-  const sourceRecord = await loadListsFromDirectory(path.resolve(process.cwd(), dataDir));
+  const sourceRecord = await loadListsFromDirectory(
+    path.resolve(process.cwd(), dataDir),
+  );
   const parsed = parseListsFromText(sourceRecord);
   const resolved = resolveAllLists(parsed);
 
@@ -86,52 +93,77 @@ async function runBuild(flags: Record<string, string | boolean>): Promise<number
     const sourceEntries = parsed[listName] ?? [];
 
     const emittedByMode = {
-      strict: emitSurgeRuleset(resolvedList, { regexMode: "strict" }),
-      balanced: emitSurgeRuleset(resolvedList, { regexMode: "balanced" }),
-      full: emitSurgeRuleset(resolvedList, { regexMode: "full" })
+      strict: emitEgernRuleset(resolvedList, { regexMode: "strict" }),
+      balanced: emitEgernRuleset(resolvedList, { regexMode: "balanced" }),
+      full: emitEgernRuleset(resolvedList, { regexMode: "full" }),
     };
 
     const modes = {
       strict: modeStatsFromEmit(emittedByMode.strict),
       balanced: modeStatsFromEmit(emittedByMode.balanced),
-      full: modeStatsFromEmit(emittedByMode.full)
+      full: modeStatsFromEmit(emittedByMode.full),
     };
 
     for (const mode of ALL_MODES) {
       const emitted = emittedByMode[mode];
-      const outputPath = path.join(outDir, "rules", mode, `${listName.toLowerCase()}.txt`);
+      const outputPath = path.join(
+        outDir,
+        "rules",
+        mode,
+        `${listName.toLowerCase()}.yaml`,
+      );
       await mkdir(path.dirname(outputPath), { recursive: true });
       await writeFile(outputPath, `${emitted.text}\n`, "utf8");
     }
 
-    const resolvedPath = path.join(outDir, "resolved", `${listName.toLowerCase()}.json`);
-    await writeFile(resolvedPath, `${JSON.stringify(resolvedList.entries, null, 2)}\n`, "utf8");
+    const resolvedPath = path.join(
+      outDir,
+      "resolved",
+      `${listName.toLowerCase()}.json`,
+    );
+    await writeFile(
+      resolvedPath,
+      `${JSON.stringify(resolvedList.entries, null, 2)}\n`,
+      "utf8",
+    );
 
     const currentListStats: ListStats = {
       name: listName,
       source: countSourceEntries(sourceEntries),
       resolved: countResolvedEntries(resolvedList.entries),
       filters: {
-        attrs: countFilterAttrs(resolvedList.entries)
+        attrs: countFilterAttrs(resolvedList.entries),
       },
-      modes
+      modes,
     };
 
     listStats.push(currentListStats);
 
-    const perListStatsPath = path.join(outDir, "stats", "lists", `${listName.toLowerCase()}.json`);
-    await writeFile(perListStatsPath, `${JSON.stringify(currentListStats, null, 2)}\n`, "utf8");
+    const perListStatsPath = path.join(
+      outDir,
+      "stats",
+      "lists",
+      `${listName.toLowerCase()}.json`,
+    );
+    await writeFile(
+      perListStatsPath,
+      `${JSON.stringify(currentListStats, null, 2)}\n`,
+      "utf8",
+    );
 
-    const sourceFile = sourceRecord[listName.toLowerCase()] !== undefined ? listName.toLowerCase() : undefined;
+    const sourceFile =
+      sourceRecord[listName.toLowerCase()] !== undefined
+        ? listName.toLowerCase()
+        : undefined;
     indexRecord[listName.toLowerCase()] = {
       name: listName,
       ...(sourceFile ? { sourceFile } : {}),
       filters: Object.keys(currentListStats.filters.attrs).sort(),
       modes: {
-        strict: `rules/strict/${listName.toLowerCase()}.txt`,
-        balanced: `rules/balanced/${listName.toLowerCase()}.txt`,
-        full: `rules/full/${listName.toLowerCase()}.txt`
-      }
+        strict: `rules/strict/${listName.toLowerCase()}.yaml`,
+        balanced: `rules/balanced/${listName.toLowerCase()}.yaml`,
+        full: `rules/full/${listName.toLowerCase()}.yaml`,
+      },
     };
   }
 
@@ -140,14 +172,28 @@ async function runBuild(flags: Record<string, string | boolean>): Promise<number
     generatedAt: new Date().toISOString(),
     defaultMode: "balanced",
     lists: listStats.length,
-    modes: ALL_MODES
+    modes: ALL_MODES,
   };
 
-  await writeFile(path.join(outDir, "stats", "global.json"), `${JSON.stringify(globalStats, null, 2)}\n`, "utf8");
-  await writeFile(path.join(outDir, "index", "geosite.json"), `${JSON.stringify(indexRecord, null, 2)}\n`, "utf8");
-  await writeFile(path.join(outDir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+  await writeFile(
+    path.join(outDir, "stats", "global.json"),
+    `${JSON.stringify(globalStats, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(outDir, "index", "geosite.json"),
+    `${JSON.stringify(indexRecord, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(outDir, "meta.json"),
+    `${JSON.stringify(meta, null, 2)}\n`,
+    "utf8",
+  );
 
-  console.log(`generated lists=${listStats.length} modes=${ALL_MODES.join(",")} output=${outDir}`);
+  console.log(
+    `generated lists=${listStats.length} modes=${ALL_MODES.join(",")} output=${outDir}`,
+  );
   console.log(`default mode path: ${path.join(outDir, "rules", "balanced")}`);
   return 0;
 }
@@ -160,15 +206,15 @@ function splitListArg(input: string): string[] {
 }
 
 function printHelp(): void {
-  console.log(`surge-geosite commands:
+  console.log(`egern-geosite commands:
   build --data-dir <dir> [--list <a,b,c>] [--out-dir <dir>]
 
 build output layout:
   <out>/meta.json
   <out>/index/geosite.json
-  <out>/rules/strict/<list>.txt
-  <out>/rules/balanced/<list>.txt
-  <out>/rules/full/<list>.txt
+  <out>/rules/strict/<list>.yaml
+  <out>/rules/balanced/<list>.yaml
+  <out>/rules/full/<list>.yaml
   <out>/resolved/<list>.json
   <out>/stats/global.json
   <out>/stats/lists/<list>.json`);
@@ -180,7 +226,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exitCode = code;
     })
     .catch((error: unknown) => {
-      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      const message =
+        error instanceof Error ? (error.stack ?? error.message) : String(error);
       console.error(message);
       process.exitCode = 1;
     });

@@ -5,11 +5,11 @@ import {
   countFilterAttrs,
   countResolvedEntries,
   countSourceEntries,
-  emitSurgeRuleset,
+  emitEgernRuleset,
   modeStatsFromEmit,
   parseListsFromText,
   resolveAllLists,
-  type ListStats
+  type ListStats,
 } from "../src/index.js";
 
 describe("stats helpers", () => {
@@ -20,8 +20,8 @@ describe("stats helpers", () => {
         "full:api.example.com @cn",
         "keyword:needle",
         "regexp:(^|\\.)netflix\\.com$",
-        "include:other @cn"
-      ].join("\n")
+        "include:other @cn",
+      ].join("\n"),
     });
 
     const demoParsed = parsed.DEMO!;
@@ -33,7 +33,7 @@ describe("stats helpers", () => {
       regexp: 1,
       include: 1,
       affiliations: 1,
-      attributes: 3
+      attributes: 3,
     });
 
     const resolved = resolveAllLists(parsed);
@@ -41,9 +41,12 @@ describe("stats helpers", () => {
 
     const resolvedCounts = countResolvedEntries(demo.entries);
     expect(resolvedCounts.rules).toBeGreaterThan(0);
-    expect(resolvedCounts.domain + resolvedCounts.full + resolvedCounts.keyword + resolvedCounts.regexp).toBe(
-      resolvedCounts.rules
-    );
+    expect(
+      resolvedCounts.domain +
+        resolvedCounts.full +
+        resolvedCounts.keyword +
+        resolvedCounts.regexp,
+    ).toBe(resolvedCounts.rules);
 
     const attrs = countFilterAttrs(demo.entries);
     expect(attrs.cn).toBeGreaterThan(0);
@@ -51,20 +54,26 @@ describe("stats helpers", () => {
 
   test("aggregates mode stats", () => {
     const parsed = parseListsFromText({
-      demo: "domain:example.com\nregexp:(^|\\.)netflix\\.com$"
+      demo: "domain:example.com\nregexp:(^|\\.)netflix\\.com$",
     });
     const resolved = resolveAllLists(parsed).DEMO!;
 
-    const strict = modeStatsFromEmit(emitSurgeRuleset(resolved, { regexMode: "strict" }));
-    const balanced = modeStatsFromEmit(emitSurgeRuleset(resolved, { regexMode: "balanced" }));
-    const full = modeStatsFromEmit(emitSurgeRuleset(resolved, { regexMode: "full" }));
+    const strict = modeStatsFromEmit(
+      emitEgernRuleset(resolved, { regexMode: "strict" }),
+    );
+    const balanced = modeStatsFromEmit(
+      emitEgernRuleset(resolved, { regexMode: "balanced" }),
+    );
+    const full = modeStatsFromEmit(
+      emitEgernRuleset(resolved, { regexMode: "full" }),
+    );
 
     const listStats: ListStats = {
       name: "DEMO",
       source: countSourceEntries(parsed.DEMO!),
       resolved: countResolvedEntries(resolved.entries),
       filters: { attrs: countFilterAttrs(resolved.entries) },
-      modes: { strict, balanced, full }
+      modes: { strict, balanced, full },
     };
 
     const global = aggregateGlobalStats([listStats]);

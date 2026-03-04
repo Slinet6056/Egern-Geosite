@@ -1,20 +1,23 @@
 import {
-  emitSurgeRuleset,
+  emitEgernRuleset,
   parseListsFromText,
   resolveAllLists,
   type DomainRule,
   type RegexMode,
-  type ResolvedList
-} from "@surge-geosite/core";
+  type ResolvedList,
+} from "@egern-geosite/core";
 import { gunzipSync, gzipSync, strFromU8, strToU8, unzipSync } from "fflate";
 
-const DEFAULT_UPSTREAM_ZIP_URL = "https://github.com/v2fly/domain-list-community/archive/refs/heads/master.zip";
-const DEFAULT_UPSTREAM_USER_AGENT = "surge-geosite-worker/2";
-const DEFAULT_SRS_UPSTREAM_BASE_URL = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set";
-const DEFAULT_SRS_UPSTREAM_USER_AGENT = "surge-geosite-worker/2";
+const DEFAULT_UPSTREAM_ZIP_URL =
+  "https://github.com/Loyalsoldier/v2ray-rules-dat/archive/refs/heads/release.zip";
+const DEFAULT_UPSTREAM_USER_AGENT = "egern-geosite-worker/2";
+const DEFAULT_SRS_UPSTREAM_BASE_URL =
+  "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set";
+const DEFAULT_SRS_UPSTREAM_USER_AGENT = "egern-geosite-worker/2";
 const DEFAULT_SRS_CACHE_TTL_SECONDS = 86400;
-const DEFAULT_MRS_UPSTREAM_BASE_URL = "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite";
-const DEFAULT_MRS_UPSTREAM_USER_AGENT = "surge-geosite-worker/2";
+const DEFAULT_MRS_UPSTREAM_BASE_URL =
+  "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite";
+const DEFAULT_MRS_UPSTREAM_USER_AGENT = "egern-geosite-worker/2";
 const DEFAULT_MRS_CACHE_TTL_SECONDS = 86400;
 const LATEST_STATE_KEY = "state/latest.json";
 const SNAPSHOT_CACHE_LIMIT = 2;
@@ -26,7 +29,10 @@ const VALID_ATTR_NAME = /^[a-z0-9!-]+$/;
 const snapshotCache = new Map<string, Promise<SnapshotPayload>>();
 const resolvedCache = new Map<string, Promise<Record<string, ResolvedList>>>();
 const artifactBuildLocks = new Map<string, Promise<ArtifactBuildResult>>();
-const remoteBinaryCacheLocks = new Map<string, Promise<ReadThroughRemoteBinaryResult>>();
+const remoteBinaryCacheLocks = new Map<
+  string,
+  Promise<ReadThroughRemoteBinaryResult>
+>();
 
 export interface R2ObjectBodyLike {
   text(): Promise<string>;
@@ -42,7 +48,11 @@ export interface R2PutOptionsLike {
 
 export interface R2BucketLike {
   get(key: string): Promise<R2ObjectBodyLike | null>;
-  put(key: string, value: string | ArrayBuffer | Uint8Array, options?: R2PutOptionsLike): Promise<void>;
+  put(
+    key: string,
+    value: string | ArrayBuffer | Uint8Array,
+    options?: R2PutOptionsLike,
+  ): Promise<void>;
   delete?(key: string): Promise<void>;
 }
 
@@ -155,50 +165,77 @@ type ReadThroughRemoteBinaryResult =
       stale: boolean;
     };
 
-type RemoteBinaryFoundResult = Extract<ReadThroughRemoteBinaryResult, { found: true }>;
+type RemoteBinaryFoundResult = Extract<
+  ReadThroughRemoteBinaryResult,
+  { found: true }
+>;
 
 export function createWorker(deps: WorkerDeps = {}): {
-  fetch(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response>;
-  scheduled(event: ScheduledEventLike, env: WorkerEnv, ctx: ExecutionContextLike): Promise<void>;
+  fetch(
+    request: Request,
+    env: WorkerEnv,
+    ctx: ExecutionContextLike,
+  ): Promise<Response>;
+  scheduled(
+    event: ScheduledEventLike,
+    env: WorkerEnv,
+    ctx: ExecutionContextLike,
+  ): Promise<void>;
 } {
   const now = deps.now ?? (() => Date.now());
   const fetchImpl = resolveFetchImpl(deps.fetchImpl);
 
   return {
-    async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response> {
+    async fetch(
+      request: Request,
+      env: WorkerEnv,
+      ctx: ExecutionContextLike,
+    ): Promise<Response> {
       return handleFetch(request, env, ctx, { now, fetchImpl });
     },
 
-    async scheduled(_event: ScheduledEventLike, env: WorkerEnv, _ctx: ExecutionContextLike): Promise<void> {
+    async scheduled(
+      _event: ScheduledEventLike,
+      env: WorkerEnv,
+      _ctx: ExecutionContextLike,
+    ): Promise<void> {
       await refreshGeositeRun(env, { now, fetchImpl });
-    }
+    },
   };
 }
 
-export async function refreshGeositeRun(env: WorkerEnv, deps: WorkerDeps = {}): Promise<RefreshResult> {
+export async function refreshGeositeRun(
+  env: WorkerEnv,
+  deps: WorkerDeps = {},
+): Promise<RefreshResult> {
   const now = deps.now ?? (() => Date.now());
   const fetchImpl = resolveFetchImpl(deps.fetchImpl);
   const checkedAt = new Date(now()).toISOString();
   const zipUrl = env.UPSTREAM_ZIP_URL ?? DEFAULT_UPSTREAM_ZIP_URL;
   const userAgent = env.UPSTREAM_USER_AGENT ?? DEFAULT_UPSTREAM_USER_AGENT;
 
-  const current = await readJson<LatestState>(env.GEOSITE_BUCKET, LATEST_STATE_KEY);
+  const current = await readJson<LatestState>(
+    env.GEOSITE_BUCKET,
+    LATEST_STATE_KEY,
+  );
 
   const headResponse = await fetchImpl(zipUrl, {
     method: "HEAD",
     headers: {
-      "user-agent": userAgent
-    }
+      "user-agent": userAgent,
+    },
   });
   if (!headResponse.ok) {
-    throw new Error(`failed to check upstream zip: ${headResponse.status} ${headResponse.statusText}`);
+    throw new Error(
+      `failed to check upstream zip: ${headResponse.status} ${headResponse.statusText}`,
+    );
   }
 
   const observedHeadEtag = normalizeEtag(headResponse.headers.get("etag"));
   if (observedHeadEtag && current?.upstream.etag === observedHeadEtag) {
     const unchangedState: LatestState = {
       ...current,
-      checkedAt
+      checkedAt,
     };
     await writeJson(env.GEOSITE_BUCKET, LATEST_STATE_KEY, unchangedState);
 
@@ -207,27 +244,30 @@ export async function refreshGeositeRun(env: WorkerEnv, deps: WorkerDeps = {}): 
       reason: "etag-unchanged",
       checkedAt,
       etag: observedHeadEtag,
-      listCount: current.snapshot.listCount
+      listCount: current.snapshot.listCount,
     };
   }
 
   const downloadResponse = await fetchImpl(zipUrl, {
     headers: {
-      "user-agent": userAgent
-    }
+      "user-agent": userAgent,
+    },
   });
   if (!downloadResponse.ok) {
-    throw new Error(`failed to download upstream zip: ${downloadResponse.status} ${downloadResponse.statusText}`);
+    throw new Error(
+      `failed to download upstream zip: ${downloadResponse.status} ${downloadResponse.statusText}`,
+    );
   }
 
   const zipBytes = new Uint8Array(await downloadResponse.arrayBuffer());
   const downloadedEtag = normalizeEtag(downloadResponse.headers.get("etag"));
-  const computedEtag = downloadedEtag ?? observedHeadEtag ?? (await sha256Hex(zipBytes));
+  const computedEtag =
+    downloadedEtag ?? observedHeadEtag ?? (await sha256Hex(zipBytes));
 
   if (current?.upstream.etag === computedEtag) {
     const unchangedState: LatestState = {
       ...current,
-      checkedAt
+      checkedAt,
     };
     await writeJson(env.GEOSITE_BUCKET, LATEST_STATE_KEY, unchangedState);
 
@@ -236,7 +276,7 @@ export async function refreshGeositeRun(env: WorkerEnv, deps: WorkerDeps = {}): 
       reason: "etag-unchanged",
       checkedAt,
       etag: computedEtag,
-      listCount: current.snapshot.listCount
+      listCount: current.snapshot.listCount,
     };
   }
 
@@ -258,7 +298,7 @@ export async function refreshGeositeRun(env: WorkerEnv, deps: WorkerDeps = {}): 
     etag: computedEtag,
     zipUrl,
     generatedAt,
-    lists: sources
+    lists: sources,
   };
 
   const compressedSnapshot = gzipSync(strToU8(JSON.stringify(snapshotPayload)));
@@ -266,33 +306,39 @@ export async function refreshGeositeRun(env: WorkerEnv, deps: WorkerDeps = {}): 
 
   await writeBinary(env.GEOSITE_BUCKET, sourceKey, compressedSnapshot, {
     contentType: "application/json",
-    cacheControl: "public, max-age=31536000, immutable"
+    cacheControl: "public, max-age=31536000, immutable",
   });
   await writeJson(env.GEOSITE_BUCKET, indexKey, index);
 
   const nextState: LatestState = {
     upstream: {
       zipUrl,
-      etag: computedEtag
+      etag: computedEtag,
     },
     snapshot: {
       sourceKey,
       indexKey,
       listCount,
-      generatedAt
+      generatedAt,
     },
     previousEtag: current?.upstream.etag ?? null,
-    checkedAt
+    checkedAt,
   };
 
-  const latestBeforeWrite = await readJson<LatestState>(env.GEOSITE_BUCKET, LATEST_STATE_KEY);
-  if (latestBeforeWrite && latestBeforeWrite.upstream.etag !== current?.upstream.etag) {
+  const latestBeforeWrite = await readJson<LatestState>(
+    env.GEOSITE_BUCKET,
+    LATEST_STATE_KEY,
+  );
+  if (
+    latestBeforeWrite &&
+    latestBeforeWrite.upstream.etag !== current?.upstream.etag
+  ) {
     return {
       updated: false,
       reason: "etag-unchanged",
       checkedAt,
       etag: latestBeforeWrite.upstream.etag,
-      listCount: latestBeforeWrite.snapshot.listCount
+      listCount: latestBeforeWrite.snapshot.listCount,
     };
   }
 
@@ -306,7 +352,7 @@ export async function refreshGeositeRun(env: WorkerEnv, deps: WorkerDeps = {}): 
     reason: "etag-updated",
     checkedAt,
     etag: computedEtag,
-    listCount
+    listCount,
   };
 }
 
@@ -314,7 +360,7 @@ async function handleFetch(
   request: Request,
   env: WorkerEnv,
   ctx: ExecutionContextLike,
-  deps: { now: () => number; fetchImpl: typeof fetch }
+  deps: { now: () => number; fetchImpl: typeof fetch },
 ): Promise<Response> {
   if (request.method !== "GET") {
     return text(405, "method not allowed");
@@ -394,7 +440,7 @@ async function handleGeositeSrs(
   listNameRaw: string,
   env: WorkerEnv,
   deps: { now: () => number; fetchImpl: typeof fetch },
-  ctx: ExecutionContextLike
+  ctx: ExecutionContextLike,
 ): Promise<Response> {
   const listName = listNameRaw.trim().toLowerCase();
   if (!isValidListName(listName)) {
@@ -402,10 +448,16 @@ async function handleGeositeSrs(
   }
 
   const fileName = `geosite-${listName}.srs`;
-  const baseUrl = trimTrailingSlash(env.SRS_UPSTREAM_BASE_URL ?? DEFAULT_SRS_UPSTREAM_BASE_URL);
+  const baseUrl = trimTrailingSlash(
+    env.SRS_UPSTREAM_BASE_URL ?? DEFAULT_SRS_UPSTREAM_BASE_URL,
+  );
   const upstreamUrl = `${baseUrl}/${fileName}`;
-  const ttlSeconds = parsePositiveInt(env.SRS_CACHE_TTL_SECONDS, DEFAULT_SRS_CACHE_TTL_SECONDS);
-  const userAgent = env.SRS_UPSTREAM_USER_AGENT ?? DEFAULT_SRS_UPSTREAM_USER_AGENT;
+  const ttlSeconds = parsePositiveInt(
+    env.SRS_CACHE_TTL_SECONDS,
+    DEFAULT_SRS_CACHE_TTL_SECONDS,
+  );
+  const userAgent =
+    env.SRS_UPSTREAM_USER_AGENT ?? DEFAULT_SRS_UPSTREAM_USER_AGENT;
 
   const result = await readThroughRemoteBinaryCache(env, {
     namespace: "geosite-srs",
@@ -419,7 +471,7 @@ async function handleGeositeSrs(
     serveStaleWhileRevalidate: true,
     onRevalidate: (promise) => {
       ctx.waitUntil(promise);
-    }
+    },
   });
 
   if (!result.found) {
@@ -427,13 +479,18 @@ async function handleGeositeSrs(
   }
 
   const headers = srsResponseHeaders(result, listName);
-  if (matchesIfNoneMatch(request.headers.get("if-none-match"), result.responseEtag)) {
+  if (
+    matchesIfNoneMatch(
+      request.headers.get("if-none-match"),
+      result.responseEtag,
+    )
+  ) {
     return notModified(headers);
   }
 
   return new Response(asResponseBody(result.body), {
     status: 200,
-    headers
+    headers,
   });
 }
 
@@ -442,7 +499,7 @@ async function handleGeositeMrs(
   listNameRaw: string,
   env: WorkerEnv,
   deps: { now: () => number; fetchImpl: typeof fetch },
-  ctx: ExecutionContextLike
+  ctx: ExecutionContextLike,
 ): Promise<Response> {
   const listName = listNameRaw.trim().toLowerCase();
   if (!isValidListName(listName)) {
@@ -450,10 +507,16 @@ async function handleGeositeMrs(
   }
 
   const fileName = `${listName}.mrs`;
-  const baseUrl = trimTrailingSlash(env.MRS_UPSTREAM_BASE_URL ?? DEFAULT_MRS_UPSTREAM_BASE_URL);
+  const baseUrl = trimTrailingSlash(
+    env.MRS_UPSTREAM_BASE_URL ?? DEFAULT_MRS_UPSTREAM_BASE_URL,
+  );
   const upstreamUrl = `${baseUrl}/${fileName}`;
-  const ttlSeconds = parsePositiveInt(env.MRS_CACHE_TTL_SECONDS, DEFAULT_MRS_CACHE_TTL_SECONDS);
-  const userAgent = env.MRS_UPSTREAM_USER_AGENT ?? DEFAULT_MRS_UPSTREAM_USER_AGENT;
+  const ttlSeconds = parsePositiveInt(
+    env.MRS_CACHE_TTL_SECONDS,
+    DEFAULT_MRS_CACHE_TTL_SECONDS,
+  );
+  const userAgent =
+    env.MRS_UPSTREAM_USER_AGENT ?? DEFAULT_MRS_UPSTREAM_USER_AGENT;
 
   const result = await readThroughRemoteBinaryCache(env, {
     namespace: "geosite-mrs",
@@ -467,7 +530,7 @@ async function handleGeositeMrs(
     serveStaleWhileRevalidate: true,
     onRevalidate: (promise) => {
       ctx.waitUntil(promise);
-    }
+    },
   });
 
   if (!result.found) {
@@ -475,17 +538,26 @@ async function handleGeositeMrs(
   }
 
   const headers = srsResponseHeaders(result, listName);
-  if (matchesIfNoneMatch(request.headers.get("if-none-match"), result.responseEtag)) {
+  if (
+    matchesIfNoneMatch(
+      request.headers.get("if-none-match"),
+      result.responseEtag,
+    )
+  ) {
     return notModified(headers);
   }
 
   return new Response(asResponseBody(result.body), {
     status: 200,
-    headers
+    headers,
   });
 }
 
-async function handleGeositeIndex(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response> {
+async function handleGeositeIndex(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContextLike,
+): Promise<Response> {
   const latest = await ensureLatestState(env);
   if (!latest) {
     return json(503, { ok: false, error: "geosite data not ready" });
@@ -493,25 +565,31 @@ async function handleGeositeIndex(request: Request, env: WorkerEnv, ctx: Executi
 
   const indexEtag = buildIndexEtag(latest.upstream.etag);
   const indexHeaders = {
-    "cache-control": "public, max-age=60, s-maxage=300, stale-while-revalidate=900",
+    "cache-control":
+      "public, max-age=60, s-maxage=300, stale-while-revalidate=900",
     etag: indexEtag,
     "x-upstream-etag": latest.upstream.etag,
     "x-generated-at": latest.snapshot.generatedAt,
-    "x-checked-at": latest.checkedAt
+    "x-checked-at": latest.checkedAt,
   };
 
   if (matchesIfNoneMatch(request.headers.get("if-none-match"), indexEtag)) {
     return notModified(indexHeaders);
   }
 
-  const index = await readJson<GeositeIndex>(env.GEOSITE_BUCKET, latest.snapshot.indexKey);
+  const index = await readJson<GeositeIndex>(
+    env.GEOSITE_BUCKET,
+    latest.snapshot.indexKey,
+  );
   if (index) {
     return json(200, index, indexHeaders);
   }
 
   const snapshot = await loadSnapshotPayload(env, latest);
   const builtIndex = buildIndexFromSources(snapshot.lists);
-  ctx.waitUntil(writeJson(env.GEOSITE_BUCKET, latest.snapshot.indexKey, builtIndex));
+  ctx.waitUntil(
+    writeJson(env.GEOSITE_BUCKET, latest.snapshot.indexKey, builtIndex),
+  );
 
   return json(200, builtIndex, indexHeaders);
 }
@@ -521,7 +599,7 @@ async function handleGeositeRules(
   mode: RegexMode,
   nameWithFilter: string,
   env: WorkerEnv,
-  ctx: ExecutionContextLike
+  ctx: ExecutionContextLike,
 ): Promise<Response> {
   const { name, filter } = splitNameFilter(nameWithFilter);
   if (!isValidListName(name) || (filter !== null && !isValidAttr(filter))) {
@@ -536,34 +614,71 @@ async function handleGeositeRules(
   const latestKey = artifactKey(latest.upstream.etag, mode, name, filter);
   const latestArtifact = await readText(env.GEOSITE_BUCKET, latestKey);
   if (latestArtifact !== null) {
-    const responseEtag = buildRulesEtag(latest.upstream.etag, mode, name, filter);
-    const headers = responseHeaders(latest.upstream.etag, mode, name, filter, false);
-    if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
+    const responseEtag = buildRulesEtag(
+      latest.upstream.etag,
+      mode,
+      name,
+      filter,
+    );
+    const headers = responseHeaders(
+      latest.upstream.etag,
+      mode,
+      name,
+      filter,
+      false,
+    );
+    if (
+      matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)
+    ) {
       return notModified(headers);
     }
     return text(200, latestArtifact, headers);
   }
 
-  const index = await readJson<GeositeIndex>(env.GEOSITE_BUCKET, latest.snapshot.indexKey);
+  const index = await readJson<GeositeIndex>(
+    env.GEOSITE_BUCKET,
+    latest.snapshot.indexKey,
+  );
   if (index && !index[name]) {
     return text(404, `list not found: ${name}`);
   }
 
-  const compilePromise = ensureArtifactForLatest(env, latest, mode, name, filter);
+  const compilePromise = ensureArtifactForLatest(
+    env,
+    latest,
+    mode,
+    name,
+    filter,
+  );
 
   if (!filter && latest.previousEtag && index && index[name]) {
     const staleKey = artifactKey(latest.previousEtag, mode, name, filter);
     const staleArtifact = await readText(env.GEOSITE_BUCKET, staleKey);
     if (staleArtifact !== null) {
-      const responseEtag = buildRulesEtag(latest.previousEtag, mode, name, filter);
-      const headers = responseHeaders(latest.previousEtag, mode, name, filter, true);
+      const responseEtag = buildRulesEtag(
+        latest.previousEtag,
+        mode,
+        name,
+        filter,
+      );
+      const headers = responseHeaders(
+        latest.previousEtag,
+        mode,
+        name,
+        filter,
+        true,
+      );
       ctx.waitUntil(
         compilePromise
-          .then((result) => maybeEnrichIndexFilters(env, latest, name, result.availableFilters))
-          .catch(() => undefined)
+          .then((result) =>
+            maybeEnrichIndexFilters(env, latest, name, result.availableFilters),
+          )
+          .catch(() => undefined),
       );
 
-      if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
+      if (
+        matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)
+      ) {
         return notModified(headers);
       }
       return text(200, staleArtifact, headers);
@@ -576,18 +691,29 @@ async function handleGeositeRules(
   }
 
   if (build.availableFilters.length > 0) {
-    ctx.waitUntil(maybeEnrichIndexFilters(env, latest, name, build.availableFilters));
+    ctx.waitUntil(
+      maybeEnrichIndexFilters(env, latest, name, build.availableFilters),
+    );
   }
 
   const responseEtag = buildRulesEtag(latest.upstream.etag, mode, name, filter);
-  const headers = responseHeaders(latest.upstream.etag, mode, name, filter, false);
+  const headers = responseHeaders(
+    latest.upstream.etag,
+    mode,
+    name,
+    filter,
+    false,
+  );
   if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
     return notModified(headers);
   }
   return text(200, build.output, headers);
 }
 
-function splitNameFilter(input: string): { name: string; filter: string | null } {
+function splitNameFilter(input: string): {
+  name: string;
+  filter: string | null;
+} {
   const normalized = input.trim().toLowerCase();
   const at = normalized.indexOf("@");
   if (at === -1) {
@@ -598,7 +724,7 @@ function splitNameFilter(input: string): { name: string; filter: string | null }
   const filter = normalized.slice(at + 1);
   return {
     name,
-    filter: filter.length === 0 ? null : filter
+    filter: filter.length === 0 ? null : filter,
   };
 }
 
@@ -607,11 +733,11 @@ function responseHeaders(
   mode: RegexMode,
   name: string,
   filter: string | null,
-  stale: boolean
+  stale: boolean,
 ): Record<string, string> {
   const responseEtag = buildRulesEtag(etag, mode, name, filter);
   return {
-    "content-type": "text/plain; charset=utf-8",
+    "content-type": "application/yaml; charset=utf-8",
     "cache-control": stale
       ? "public, max-age=60, s-maxage=120, stale-while-revalidate=900"
       : "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
@@ -620,13 +746,13 @@ function responseHeaders(
     "x-mode": mode,
     "x-list": name.toLowerCase(),
     ...(filter ? { "x-filter": filter } : {}),
-    ...(stale ? { "x-stale": "1" } : {})
+    ...(stale ? { "x-stale": "1" } : {}),
   };
 }
 
 function srsResponseHeaders(
   result: Extract<ReadThroughRemoteBinaryResult, { found: true }>,
-  listName: string
+  listName: string,
 ): Record<string, string> {
   return {
     "content-type": result.contentType,
@@ -636,31 +762,34 @@ function srsResponseHeaders(
     etag: result.responseEtag,
     "x-list": listName,
     ...(result.sourceEtag ? { "x-upstream-etag": result.sourceEtag } : {}),
-    ...(result.stale ? { "x-stale": "1" } : {})
+    ...(result.stale ? { "x-stale": "1" } : {}),
   };
 }
 
 async function readThroughRemoteBinaryCache(
   env: WorkerEnv,
-  options: ReadThroughRemoteBinaryOptions
+  options: ReadThroughRemoteBinaryOptions,
 ): Promise<ReadThroughRemoteBinaryResult> {
   const blobKey = remoteBlobKey(options.namespace, options.cacheKey);
   const metaKey = remoteMetaKey(options.namespace, options.cacheKey);
 
   const [cachedObject, cachedMetaRaw] = await Promise.all([
     env.GEOSITE_BUCKET.get(blobKey),
-    readJson<RemoteBinaryCacheMeta>(env.GEOSITE_BUCKET, metaKey)
+    readJson<RemoteBinaryCacheMeta>(env.GEOSITE_BUCKET, metaKey),
   ]);
 
-  const cachedBody = cachedObject ? new Uint8Array(await cachedObject.arrayBuffer()) : null;
+  const cachedBody = cachedObject
+    ? new Uint8Array(await cachedObject.arrayBuffer())
+    : null;
   const cachedMeta = await normalizeRemoteBinaryCacheMeta(
     cachedMetaRaw,
     options.namespace,
     options.cacheKey,
     cachedBody,
-    options.fallbackContentType
+    options.fallbackContentType,
   );
-  const cached = cachedBody && cachedMeta ? { body: cachedBody, meta: cachedMeta } : null;
+  const cached =
+    cachedBody && cachedMeta ? { body: cachedBody, meta: cachedMeta } : null;
 
   const nowMs = options.now();
   const ttlMs = options.ttlSeconds * 1000;
@@ -670,12 +799,18 @@ async function readThroughRemoteBinaryCache(
       responseEtag: cached.meta.responseEtag,
       sourceEtag: cached.meta.sourceEtag,
       contentType: cached.meta.contentType,
-      stale: false
+      stale: false,
     });
   }
 
   if (cached && options.serveStaleWhileRevalidate) {
-    const refresh = ensureRemoteBinaryRevalidated(env, options, cached, blobKey, metaKey)
+    const refresh = ensureRemoteBinaryRevalidated(
+      env,
+      options,
+      cached,
+      blobKey,
+      metaKey,
+    )
       .then(() => undefined)
       .catch(() => undefined);
     options.onRevalidate?.(refresh);
@@ -685,7 +820,7 @@ async function readThroughRemoteBinaryCache(
       responseEtag: cached.meta.responseEtag,
       sourceEtag: cached.meta.sourceEtag,
       contentType: cached.meta.contentType,
-      stale: true
+      stale: true,
     });
   }
 
@@ -697,7 +832,7 @@ async function ensureRemoteBinaryRevalidated(
   options: ReadThroughRemoteBinaryOptions,
   cached: { body: Uint8Array; meta: RemoteBinaryCacheMeta } | null,
   blobKey: string,
-  metaKey: string
+  metaKey: string,
 ): Promise<ReadThroughRemoteBinaryResult> {
   const lockKey = `${options.namespace}:${options.cacheKey}`;
   const existingLock = remoteBinaryCacheLocks.get(lockKey);
@@ -705,15 +840,16 @@ async function ensureRemoteBinaryRevalidated(
     return existingLock;
   }
 
-  const lock: Promise<ReadThroughRemoteBinaryResult> = revalidateRemoteBinaryFromUpstream(
-    env,
-    options,
-    cached,
-    blobKey,
-    metaKey
-  ).finally(() => {
-    remoteBinaryCacheLocks.delete(lockKey);
-  });
+  const lock: Promise<ReadThroughRemoteBinaryResult> =
+    revalidateRemoteBinaryFromUpstream(
+      env,
+      options,
+      cached,
+      blobKey,
+      metaKey,
+    ).finally(() => {
+      remoteBinaryCacheLocks.delete(lockKey);
+    });
 
   remoteBinaryCacheLocks.set(lockKey, lock);
   return lock;
@@ -724,10 +860,10 @@ async function revalidateRemoteBinaryFromUpstream(
   options: ReadThroughRemoteBinaryOptions,
   cached: { body: Uint8Array; meta: RemoteBinaryCacheMeta } | null,
   blobKey: string,
-  metaKey: string
+  metaKey: string,
 ): Promise<ReadThroughRemoteBinaryResult> {
   const requestHeaders: Record<string, string> = {
-    "user-agent": options.userAgent
+    "user-agent": options.userAgent,
   };
   if (cached?.meta.sourceEtag) {
     requestHeaders["if-none-match"] = cached.meta.sourceEtag;
@@ -737,13 +873,13 @@ async function revalidateRemoteBinaryFromUpstream(
 
   try {
     const upstreamResponse = await options.fetchImpl(options.upstreamUrl, {
-      headers: requestHeaders
+      headers: requestHeaders,
     });
 
     if (upstreamResponse.status === 304 && cached) {
       const refreshedMeta: RemoteBinaryCacheMeta = {
         ...cached.meta,
-        fetchedAt: nowIso
+        fetchedAt: nowIso,
       };
       await writeJson(env.GEOSITE_BUCKET, metaKey, refreshedMeta);
       return remoteBinaryFound({
@@ -751,7 +887,7 @@ async function revalidateRemoteBinaryFromUpstream(
         responseEtag: refreshedMeta.responseEtag,
         sourceEtag: refreshedMeta.sourceEtag,
         contentType: refreshedMeta.contentType,
-        stale: false
+        stale: false,
       });
     }
 
@@ -767,31 +903,41 @@ async function revalidateRemoteBinaryFromUpstream(
           responseEtag: cached.meta.responseEtag,
           sourceEtag: cached.meta.sourceEtag,
           contentType: cached.meta.contentType,
-          stale: true
+          stale: true,
         });
       }
-      throw new Error(`failed to fetch remote binary: ${upstreamResponse.status} ${upstreamResponse.statusText}`);
+      throw new Error(
+        `failed to fetch remote binary: ${upstreamResponse.status} ${upstreamResponse.statusText}`,
+      );
     }
 
-    const contentType = upstreamResponse.headers.get("content-type") ?? options.fallbackContentType;
+    const contentType =
+      upstreamResponse.headers.get("content-type") ??
+      options.fallbackContentType;
     const sourceEtag = normalizeEtag(upstreamResponse.headers.get("etag"));
     const body = new Uint8Array(await upstreamResponse.arrayBuffer());
-    const responseEtag = await buildRemoteBinaryEtag(options.namespace, options.cacheKey, sourceEtag, body);
+    const responseEtag = await buildRemoteBinaryEtag(
+      options.namespace,
+      options.cacheKey,
+      sourceEtag,
+      body,
+    );
 
     const nextMeta: RemoteBinaryCacheMeta = {
       version: 1,
       sourceEtag,
       responseEtag,
       fetchedAt: nowIso,
-      contentType
+      contentType,
     };
 
     await Promise.all([
       writeBinary(env.GEOSITE_BUCKET, blobKey, body, {
         contentType,
-        cacheControl: "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400"
+        cacheControl:
+          "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
       }),
-      writeJson(env.GEOSITE_BUCKET, metaKey, nextMeta)
+      writeJson(env.GEOSITE_BUCKET, metaKey, nextMeta),
     ]);
 
     return remoteBinaryFound({
@@ -799,7 +945,7 @@ async function revalidateRemoteBinaryFromUpstream(
       responseEtag,
       sourceEtag,
       contentType,
-      stale: false
+      stale: false,
     });
   } catch (error) {
     if (cached) {
@@ -808,7 +954,7 @@ async function revalidateRemoteBinaryFromUpstream(
         responseEtag: cached.meta.responseEtag,
         sourceEtag: cached.meta.sourceEtag,
         contentType: cached.meta.contentType,
-        stale: true
+        stale: true,
       });
     }
     throw error;
@@ -819,7 +965,12 @@ function buildIndexEtag(upstreamEtag: string): string {
   return `"${upstreamEtag}-index"`;
 }
 
-function buildRulesEtag(upstreamEtag: string, mode: RegexMode, name: string, filter: string | null): string {
+function buildRulesEtag(
+  upstreamEtag: string,
+  mode: RegexMode,
+  name: string,
+  filter: string | null,
+): string {
   return `"${upstreamEtag}:${mode}:${name.toLowerCase()}${filter ? `@${filter}` : ""}"`;
 }
 
@@ -843,7 +994,7 @@ function notModified(headers: Record<string, string>): Response {
   delete nextHeaders["content-type"];
   return new Response(null, {
     status: 304,
-    headers: nextHeaders
+    headers: nextHeaders,
   });
 }
 
@@ -852,7 +1003,7 @@ async function ensureArtifactForLatest(
   latest: LatestState,
   mode: RegexMode,
   name: string,
-  filter: string | null
+  filter: string | null,
 ): Promise<ArtifactBuildResult> {
   const lockKey = `${latest.upstream.etag}:${mode}:${artifactName(name, filter)}`;
   const existingLock = artifactBuildLocks.get(lockKey);
@@ -867,7 +1018,7 @@ async function ensureArtifactForLatest(
       return {
         listFound: true,
         output: existing,
-        availableFilters: []
+        availableFilters: [],
       };
     }
 
@@ -877,7 +1028,7 @@ async function ensureArtifactForLatest(
       return {
         listFound: false,
         output: "",
-        availableFilters: []
+        availableFilters: [],
       };
     }
 
@@ -886,31 +1037,34 @@ async function ensureArtifactForLatest(
       return {
         listFound: true,
         output: "",
-        availableFilters
+        availableFilters,
       };
     }
 
-    const entries = filter ? target.entries.filter((entry) => entry.attrs.includes(filter)) : target.entries;
+    const entries = filter
+      ? target.entries.filter((entry) => entry.attrs.includes(filter))
+      : target.entries;
 
-    const emitted = emitSurgeRuleset(
+    const emitted = emitEgernRuleset(
       {
         name: target.name,
-        entries
+        entries,
       },
       {
         regexMode: mode,
-        onUnsupportedRegex: "skip"
-      }
+        onUnsupportedRegex: "skip",
+      },
     );
 
     const output = emitted.text.length > 0 ? `${emitted.text}\n` : "";
     await writeText(env.GEOSITE_BUCKET, outputKey, output, {
-      cacheControl: "public, max-age=31536000, immutable"
+      contentType: "application/yaml; charset=utf-8",
+      cacheControl: "public, max-age=31536000, immutable",
     });
     return {
       listFound: true,
       output,
-      availableFilters
+      availableFilters,
     };
   })().finally(() => {
     artifactBuildLocks.delete(lockKey);
@@ -920,7 +1074,10 @@ async function ensureArtifactForLatest(
   return lock;
 }
 
-async function loadResolvedLists(env: WorkerEnv, latest: LatestState): Promise<Record<string, ResolvedList>> {
+async function loadResolvedLists(
+  env: WorkerEnv,
+  latest: LatestState,
+): Promise<Record<string, ResolvedList>> {
   const cacheKey = latest.upstream.etag;
   const cached = resolvedCache.get(cacheKey);
   if (cached) {
@@ -941,7 +1098,10 @@ async function loadResolvedLists(env: WorkerEnv, latest: LatestState): Promise<R
   });
 }
 
-async function loadSnapshotPayload(env: WorkerEnv, latest: LatestState): Promise<SnapshotPayload> {
+async function loadSnapshotPayload(
+  env: WorkerEnv,
+  latest: LatestState,
+): Promise<SnapshotPayload> {
   const cacheKey = latest.snapshot.sourceKey;
   const cached = snapshotCache.get(cacheKey);
   if (cached) {
@@ -975,14 +1135,17 @@ async function maybeEnrichIndexFilters(
   env: WorkerEnv,
   latest: LatestState,
   listName: string,
-  filters: string[]
+  filters: string[],
 ): Promise<void> {
   if (filters.length === 0) {
     return;
   }
 
   const normalizedFilters = [...new Set(filters)].sort();
-  const index = await readJson<GeositeIndex>(env.GEOSITE_BUCKET, latest.snapshot.indexKey);
+  const index = await readJson<GeositeIndex>(
+    env.GEOSITE_BUCKET,
+    latest.snapshot.indexKey,
+  );
   if (!index) {
     return;
   }
@@ -1001,8 +1164,8 @@ async function maybeEnrichIndexFilters(
     ...index,
     [lookupName]: {
       ...current,
-      filters: normalizedFilters
-    }
+      filters: normalizedFilters,
+    },
   };
 
   await writeJson(env.GEOSITE_BUCKET, latest.snapshot.indexKey, nextIndex);
@@ -1018,10 +1181,10 @@ function buildIndexFromSources(sources: Record<string, string>): GeositeIndex {
       sourceFile: listName,
       filters: [],
       modes: {
-        strict: `rules/strict/${listName}.txt`,
-        balanced: `rules/balanced/${listName}.txt`,
-        full: `rules/full/${listName}.txt`
-      }
+        strict: `rules/strict/${listName}.yaml`,
+        balanced: `rules/balanced/${listName}.yaml`,
+        full: `rules/full/${listName}.yaml`,
+      },
     };
   }
 
@@ -1042,30 +1205,298 @@ function collectFilters(entries: DomainRule[]): string[] {
 
 function extractSourcesFromZip(zipData: Uint8Array): Record<string, string> {
   const files = unzipSync(zipData);
-  const sources: Record<string, string> = {};
+  const fromDat = extractSourcesFromGeositeDat(files);
+  if (fromDat === null) {
+    throw new Error("no geosite.dat found in upstream zip");
+  }
+  return fromDat;
+}
 
+interface GeositeDatDomain {
+  type: number;
+  value: string;
+  attrs: string[];
+}
+
+interface GeositeDatEntry {
+  countryCode: string;
+  domains: GeositeDatDomain[];
+}
+
+interface ProtoReader {
+  input: Uint8Array;
+  offset: number;
+}
+
+function extractSourcesFromGeositeDat(
+  files: Record<string, Uint8Array>,
+): Record<string, string> | null {
   for (const [filePath, content] of Object.entries(files)) {
-    const match = /\/data\/([^/]+)$/.exec(filePath);
-    if (!match) {
+    if (!/\/geosite\.dat$/i.test(filePath)) {
       continue;
     }
 
-    const listName = match[1]!.toLowerCase();
-    if (!VALID_LIST_NAME.test(listName)) {
-      continue;
+    const parsed = parseGeositeDat(content);
+    if (parsed.length === 0) {
+      throw new Error("geosite.dat is empty");
     }
 
-    sources[listName] = strFromU8(content);
+    const lineMap = new Map<string, string[]>();
+    for (const entry of parsed) {
+      const listName = entry.countryCode.trim().toLowerCase();
+      if (!VALID_LIST_NAME.test(listName)) {
+        continue;
+      }
+
+      const lines = lineMap.get(listName) ?? [];
+      for (const domain of entry.domains) {
+        const line = toGeositeSourceLine(domain);
+        if (!line) {
+          continue;
+        }
+        lines.push(line);
+      }
+      lineMap.set(listName, lines);
+    }
+
+    if (lineMap.size === 0) {
+      throw new Error("geosite.dat contains no valid list names");
+    }
+
+    const sources: Record<string, string> = {};
+    for (const [listName, lines] of lineMap.entries()) {
+      sources[listName] = lines.join("\n");
+    }
+    return sources;
   }
 
-  return sources;
+  return null;
+}
+
+function parseGeositeDat(input: Uint8Array): GeositeDatEntry[] {
+  const reader: ProtoReader = { input, offset: 0 };
+  const entries: GeositeDatEntry[] = [];
+
+  while (!protoEof(reader)) {
+    const tag = readVarint(reader);
+    const field = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    if (field === 1 && wireType === 2) {
+      entries.push(parseGeositeDatEntry(readLengthDelimited(reader)));
+      continue;
+    }
+
+    skipField(reader, wireType);
+  }
+
+  return entries;
+}
+
+function parseGeositeDatEntry(input: Uint8Array): GeositeDatEntry {
+  const reader: ProtoReader = { input, offset: 0 };
+  let countryCode = "";
+  const domains: GeositeDatDomain[] = [];
+
+  while (!protoEof(reader)) {
+    const tag = readVarint(reader);
+    const field = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    if (field === 1 && wireType === 2) {
+      countryCode = strFromU8(readLengthDelimited(reader));
+      continue;
+    }
+
+    if (field === 2 && wireType === 2) {
+      domains.push(parseGeositeDatDomain(readLengthDelimited(reader)));
+      continue;
+    }
+
+    skipField(reader, wireType);
+  }
+
+  return {
+    countryCode,
+    domains,
+  };
+}
+
+function parseGeositeDatDomain(input: Uint8Array): GeositeDatDomain {
+  const reader: ProtoReader = { input, offset: 0 };
+  let type = 0;
+  let value = "";
+  const attrs: string[] = [];
+
+  while (!protoEof(reader)) {
+    const tag = readVarint(reader);
+    const field = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    if (field === 1 && wireType === 0) {
+      type = readVarint(reader);
+      continue;
+    }
+
+    if (field === 2 && wireType === 2) {
+      value = strFromU8(readLengthDelimited(reader));
+      continue;
+    }
+
+    if (field === 3 && wireType === 2) {
+      const key = parseGeositeDatAttribute(readLengthDelimited(reader));
+      if (key) {
+        attrs.push(key);
+      }
+      continue;
+    }
+
+    skipField(reader, wireType);
+  }
+
+  return {
+    type,
+    value,
+    attrs,
+  };
+}
+
+function parseGeositeDatAttribute(input: Uint8Array): string | null {
+  const reader: ProtoReader = { input, offset: 0 };
+
+  while (!protoEof(reader)) {
+    const tag = readVarint(reader);
+    const field = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    if (field === 1 && wireType === 2) {
+      return strFromU8(readLengthDelimited(reader));
+    }
+
+    skipField(reader, wireType);
+  }
+
+  return null;
+}
+
+function toGeositeSourceLine(domain: GeositeDatDomain): string | null {
+  const value = domain.value.trim();
+  if (!value) {
+    return null;
+  }
+
+  let prefix: string;
+  if (domain.type === 0) {
+    prefix = `keyword:${value}`;
+  } else if (domain.type === 2) {
+    prefix = `domain:${value}`;
+  } else if (domain.type === 1) {
+    prefix = `regexp:${value}`;
+  } else if (domain.type === 3) {
+    prefix = `full:${value}`;
+  } else {
+    return null;
+  }
+
+  const attrs = Array.from(
+    new Set(
+      domain.attrs
+        .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length > 0 && VALID_ATTR_NAME.test(item)),
+    ),
+  );
+  if (attrs.length === 0) {
+    return prefix;
+  }
+
+  return `${prefix} ${attrs.map((attr) => `@${attr}`).join(" ")}`;
+}
+
+function protoEof(reader: ProtoReader): boolean {
+  return reader.offset >= reader.input.length;
+}
+
+function readVarint(reader: ProtoReader): number {
+  let shift = 0;
+  let value = 0;
+
+  for (let index = 0; index < 10; index += 1) {
+    if (reader.offset >= reader.input.length) {
+      throw new Error("unexpected EOF while reading varint");
+    }
+
+    const byte = reader.input[reader.offset] ?? 0;
+    reader.offset += 1;
+    value += (byte & 0x7f) * 2 ** shift;
+
+    if ((byte & 0x80) === 0) {
+      if (!Number.isSafeInteger(value)) {
+        throw new Error("varint exceeds safe integer range");
+      }
+      return value;
+    }
+
+    shift += 7;
+  }
+
+  throw new Error("varint is too long");
+}
+
+function readLengthDelimited(reader: ProtoReader): Uint8Array {
+  const length = readVarint(reader);
+  if (length < 0) {
+    throw new Error("negative length-delimited size");
+  }
+
+  const end = reader.offset + length;
+  if (end > reader.input.length) {
+    throw new Error("length-delimited field exceeds input size");
+  }
+
+  const view = reader.input.subarray(reader.offset, end);
+  reader.offset = end;
+  return view;
+}
+
+function skipField(reader: ProtoReader, wireType: number): void {
+  if (wireType === 0) {
+    void readVarint(reader);
+    return;
+  }
+
+  if (wireType === 1) {
+    const end = reader.offset + 8;
+    if (end > reader.input.length) {
+      throw new Error("fixed64 field exceeds input size");
+    }
+    reader.offset = end;
+    return;
+  }
+
+  if (wireType === 2) {
+    void readLengthDelimited(reader);
+    return;
+  }
+
+  if (wireType === 5) {
+    const end = reader.offset + 4;
+    if (end > reader.input.length) {
+      throw new Error("fixed32 field exceeds input size");
+    }
+    reader.offset = end;
+    return;
+  }
+
+  throw new Error(`unsupported wire type: ${wireType}`);
 }
 
 function normalizeEtag(raw: string | null): string | null {
   if (!raw) {
     return null;
   }
-  return raw.replace(/^W\//, "").replace(/^"/, "").replace(/"$/, "").trim() || null;
+  return (
+    raw.replace(/^W\//, "").replace(/^"/, "").replace(/"$/, "").trim() || null
+  );
 }
 
 async function sha256Hex(input: Uint8Array): Promise<string> {
@@ -1080,8 +1511,13 @@ function artifactName(name: string, filter: string | null): string {
   return filter ? `${name}@${filter}` : name;
 }
 
-function artifactKey(etag: string, mode: RegexMode, name: string, filter: string | null): string {
-  return `artifacts/${etag}/${mode}/${artifactName(name, filter)}.txt`;
+function artifactKey(
+  etag: string,
+  mode: RegexMode,
+  name: string,
+  filter: string | null,
+): string {
+  return `artifacts/${etag}/${mode}/${artifactName(name, filter)}.yaml`;
 }
 
 function snapshotSourceKey(etag: string): string {
@@ -1105,7 +1541,7 @@ async function normalizeRemoteBinaryCacheMeta(
   namespace: string,
   cacheKey: string,
   cachedBody: Uint8Array | null,
-  fallbackContentType: string
+  fallbackContentType: string,
 ): Promise<RemoteBinaryCacheMeta | null> {
   if (
     input &&
@@ -1117,10 +1553,11 @@ async function normalizeRemoteBinaryCacheMeta(
   ) {
     return {
       version: 1,
-      sourceEtag: typeof input.sourceEtag === "string" ? input.sourceEtag : null,
+      sourceEtag:
+        typeof input.sourceEtag === "string" ? input.sourceEtag : null,
       responseEtag: input.responseEtag,
       fetchedAt: input.fetchedAt,
-      contentType: input.contentType
+      contentType: input.contentType,
     };
   }
 
@@ -1131,9 +1568,14 @@ async function normalizeRemoteBinaryCacheMeta(
   return {
     version: 1,
     sourceEtag: null,
-    responseEtag: await buildRemoteBinaryEtag(namespace, cacheKey, null, cachedBody),
+    responseEtag: await buildRemoteBinaryEtag(
+      namespace,
+      cacheKey,
+      null,
+      cachedBody,
+    ),
     fetchedAt: new Date(0).toISOString(),
-    contentType: fallbackContentType
+    contentType: fallbackContentType,
   };
 }
 
@@ -1152,7 +1594,7 @@ async function buildRemoteBinaryEtag(
   namespace: string,
   cacheKey: string,
   sourceEtag: string | null,
-  body: Uint8Array
+  body: Uint8Array,
 ): Promise<string> {
   const stableToken = sourceEtag ?? (await sha256Hex(body));
   const safeToken = stableToken.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -1181,11 +1623,11 @@ function remoteBinaryNotFound(): ReadThroughRemoteBinaryResult {
 }
 
 function remoteBinaryFound(
-  input: Omit<RemoteBinaryFoundResult, "found">
+  input: Omit<RemoteBinaryFoundResult, "found">,
 ): RemoteBinaryFoundResult {
   return {
     found: true,
-    ...input
+    ...input,
   };
 }
 
@@ -1213,7 +1655,10 @@ function safeDecodeURIComponent(value: string): string | null {
   }
 }
 
-async function readText(bucket: R2BucketLike, key: string): Promise<string | null> {
+async function readText(
+  bucket: R2BucketLike,
+  key: string,
+): Promise<string | null> {
   const object = await bucket.get(key);
   if (!object) {
     return null;
@@ -1221,7 +1666,10 @@ async function readText(bucket: R2BucketLike, key: string): Promise<string | nul
   return object.text();
 }
 
-async function readJson<T>(bucket: R2BucketLike, key: string): Promise<T | null> {
+async function readJson<T>(
+  bucket: R2BucketLike,
+  key: string,
+): Promise<T | null> {
   const content = await readText(bucket, key);
   if (content === null) {
     return null;
@@ -1233,25 +1681,29 @@ async function writeText(
   bucket: R2BucketLike,
   key: string,
   content: string,
-  options: { contentType?: string; cacheControl?: string } = {}
+  options: { contentType?: string; cacheControl?: string } = {},
 ): Promise<void> {
   const metadata: NonNullable<R2PutOptionsLike["httpMetadata"]> = {
-    contentType: options.contentType ?? "text/plain; charset=utf-8"
+    contentType: options.contentType ?? "text/plain; charset=utf-8",
   };
   if (options.cacheControl) {
     metadata.cacheControl = options.cacheControl;
   }
 
   await bucket.put(key, content, {
-    httpMetadata: metadata
+    httpMetadata: metadata,
   });
 }
 
-async function writeJson(bucket: R2BucketLike, key: string, value: unknown): Promise<void> {
+async function writeJson(
+  bucket: R2BucketLike,
+  key: string,
+  value: unknown,
+): Promise<void> {
   await bucket.put(key, `${JSON.stringify(value)}\n`, {
     httpMetadata: {
-      contentType: "application/json; charset=utf-8"
-    }
+      contentType: "application/json; charset=utf-8",
+    },
   });
 }
 
@@ -1259,21 +1711,25 @@ async function writeBinary(
   bucket: R2BucketLike,
   key: string,
   value: Uint8Array,
-  options: { contentType: string; cacheControl?: string }
+  options: { contentType: string; cacheControl?: string },
 ): Promise<void> {
   const metadata: NonNullable<R2PutOptionsLike["httpMetadata"]> = {
-    contentType: options.contentType
+    contentType: options.contentType,
   };
   if (options.cacheControl) {
     metadata.cacheControl = options.cacheControl;
   }
 
   await bucket.put(key, value, {
-    httpMetadata: metadata
+    httpMetadata: metadata,
   });
 }
 
-async function deleteRemoteCacheEntry(bucket: R2BucketLike, blobKey: string, metaKey: string): Promise<void> {
+async function deleteRemoteCacheEntry(
+  bucket: R2BucketLike,
+  blobKey: string,
+  metaKey: string,
+): Promise<void> {
   if (!bucket.delete) {
     return;
   }
@@ -1287,7 +1743,8 @@ function resolveFetchImpl(input?: typeof fetch): typeof fetch {
     return input;
   }
 
-  return (request: RequestInfo | URL, init?: RequestInit): Promise<Response> => fetch(request, init);
+  return (request: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    fetch(request, init);
 }
 
 function pruneMap<T>(map: Map<string, T>, keep: number): void {
@@ -1314,31 +1771,47 @@ function isSameStringArray(left: string[], right: string[]): boolean {
   return true;
 }
 
-function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
+function json(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      ...headers
-    }
+      ...headers,
+    },
   });
 }
 
-function text(status: number, body: string, headers: Record<string, string> = {}): Response {
+function text(
+  status: number,
+  body: string,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(body, {
     status,
-    headers
+    headers,
   });
 }
 
 const worker = createWorker();
 
 export default {
-  fetch(request: Request, env: WorkerEnv, ctx: ExecutionContextLike): Promise<Response> {
+  fetch(
+    request: Request,
+    env: WorkerEnv,
+    ctx: ExecutionContextLike,
+  ): Promise<Response> {
     return worker.fetch(request, env, ctx);
   },
 
-  scheduled(event: ScheduledEventLike, env: WorkerEnv, ctx: ExecutionContextLike): Promise<void> {
+  scheduled(
+    event: ScheduledEventLike,
+    env: WorkerEnv,
+    ctx: ExecutionContextLike,
+  ): Promise<void> {
     return worker.scheduled(event, env, ctx);
-  }
+  },
 };

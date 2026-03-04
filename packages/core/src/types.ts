@@ -33,14 +33,14 @@ export interface ResolvedList {
 
 export type RegexMode = "strict" | "balanced" | "full";
 
-export type SurgeRuleType =
+export type EgernRuleType =
   | "DOMAIN-SUFFIX"
   | "DOMAIN"
   | "DOMAIN-KEYWORD"
   | "DOMAIN-WILDCARD";
 
-export interface SurgeRule {
-  type: SurgeRuleType;
+export interface EgernRule {
+  type: EgernRuleType;
   value: string;
   source: SourceLocation;
 }
@@ -63,22 +63,22 @@ export interface EmitReport {
   unsupported: RegexIssue[];
 }
 
-export interface EmitSurgeOptions {
+export interface EmitEgernOptions {
   regexMode?: RegexMode;
   onUnsupportedRegex?: "skip" | "error";
   dedupe?: boolean;
 }
 
-export interface EmitSurgeResult {
+export interface EmitEgernResult {
   lines: string[];
   text: string;
-  rules: SurgeRule[];
+  rules: EgernRule[];
   report: EmitReport;
 }
 
 export interface RegexTranspileResult {
   status: "lossless" | "widened" | "unsupported";
-  rules: Array<Pick<SurgeRule, "type" | "value">>;
+  rules: Array<Pick<EgernRule, "type" | "value">>;
   reason?: string;
 }
 

@@ -1,6 +1,6 @@
-# @surge-geosite/panel
+# @egern-geosite/panel
 
-SvelteKit SSR panel for Surge Geosite.
+SvelteKit SSR panel for Egern Geosite.
 
 ## Routes
 
@@ -10,10 +10,10 @@ SvelteKit SSR panel for Surge Geosite.
 
 ## Scripts
 
-- `pnpm --filter @surge-geosite/panel run dev`
-- `pnpm --filter @surge-geosite/panel run typecheck`
-- `pnpm --filter @surge-geosite/panel run build`
-- `pnpm --filter @surge-geosite/panel run cf:deploy`
+- `pnpm --filter @egern-geosite/panel run dev`
+- `pnpm --filter @egern-geosite/panel run typecheck`
+- `pnpm --filter @egern-geosite/panel run build`
+- `pnpm --filter @egern-geosite/panel run cf:deploy`
 
 ## Cloudflare
 
@@ -21,4 +21,4 @@ SvelteKit SSR panel for Surge Geosite.
 
 - `main = ".svelte-kit/cloudflare/_worker.js"`
 - `assets.directory = ".svelte-kit/cloudflare"`
-- `services.GEOSITE_API -> surge-geosite` (required internal service binding)
+- `services.GEOSITE_API -> egern-geosite` (required internal service binding)

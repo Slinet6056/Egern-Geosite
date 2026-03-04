@@ -1,4 +1,4 @@
-# @surge-geosite/worker
+# @egern-geosite/worker
 
 Cloudflare Worker runtime for geosite API serving with built-in cron refresh.
 
@@ -13,11 +13,11 @@ Cloudflare Worker runtime for geosite API serving with built-in cron refresh.
 - `scheduled`:
   - HEAD upstream ZIP to check ETag.
   - If ETag unchanged: update check timestamp only.
-  - If ETag changed: download ZIP once, extract `data/*`, write snapshot + index to R2, then update `state/latest.json`.
+  - If ETag changed: download ZIP once, parse `geosite.dat` into source lists, write snapshot + index to R2, then update `state/latest.json`.
 - `fetch`:
   - Route `/geosite*` requests to API handlers.
   - API handlers read latest state from R2.
-  - Serve prebuilt artifact from `artifacts/{etag}/{mode}/{name[@filter]}.txt` when available.
+  - Serve prebuilt artifact from `artifacts/{etag}/{mode}/{name[@filter]}.yaml` when available.
   - On miss, compile on-demand from snapshot and cache artifact.
   - Unknown filters are served as empty output but are not persisted as artifacts.
   - If previous ETag artifact exists, return stale artifact immediately and refresh latest artifact in background (`waitUntil`).
@@ -28,7 +28,7 @@ Cloudflare Worker runtime for geosite API serving with built-in cron refresh.
 - `state/latest.json`
 - `snapshots/{etag}/sources.json.gz`
 - `snapshots/{etag}/index/geosite.json`
-- `artifacts/{etag}/{mode}/{name[@filter]}.txt`
+- `artifacts/{etag}/{mode}/{name[@filter]}.yaml`
 
 Retention:
 

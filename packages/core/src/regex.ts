@@ -1,11 +1,16 @@
 import type { RegexMode, RegexTranspileResult } from "./types.js";
 
 const EXACT_DOMAIN_PATTERN = /^\^([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i;
-const SUFFIX_DOMAIN_PATTERN = /^\(\^\|\\\.\)([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i;
-const REPEATED_SUBDOMAIN_PATTERN = /^\^\(\.\+\\\.\)\*([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i;
+const SUFFIX_DOMAIN_PATTERN =
+  /^\(\^\|\\\.\)([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i;
+const REPEATED_SUBDOMAIN_PATTERN =
+  /^\^\(\.\+\\\.\)\*([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i;
 const ADVANCED_TOKENS_PATTERN = /\(\?<?[=!]|\\[1-9]/;
 
-export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTranspileResult {
+export function transpileRegexToEgern(
+  pattern: string,
+  mode: RegexMode,
+): RegexTranspileResult {
   const exact = pattern.match(EXACT_DOMAIN_PATTERN);
   if (exact) {
     return {
@@ -13,9 +18,9 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
       rules: [
         {
           type: "DOMAIN",
-          value: unescapeDomain(exact[1]!)
-        }
-      ]
+          value: unescapeDomain(exact[1]!),
+        },
+      ],
     };
   }
 
@@ -26,9 +31,9 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
       rules: [
         {
           type: "DOMAIN-SUFFIX",
-          value: unescapeDomain(suffix[1]!)
-        }
-      ]
+          value: unescapeDomain(suffix[1]!),
+        },
+      ],
     };
   }
 
@@ -39,10 +44,10 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
       rules: [
         {
           type: "DOMAIN-SUFFIX",
-          value: unescapeDomain(repeatedSubdomain[1]!)
-        }
+          value: unescapeDomain(repeatedSubdomain[1]!),
+        },
       ],
-      reason: "Converted repeated subdomain regexp to DOMAIN-SUFFIX."
+      reason: "Converted repeated subdomain regexp to DOMAIN-SUFFIX.",
     };
   }
 
@@ -50,7 +55,7 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
     return {
       status: "unsupported",
       rules: [],
-      reason: "Pattern is not losslessly representable in Surge domain rules."
+      reason: "Pattern is not losslessly representable in Egern domain rules.",
     };
   }
 
@@ -63,10 +68,10 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
           rules: [
             {
               type: "DOMAIN-SUFFIX",
-              value: tail
-            }
+              value: tail,
+            },
           ],
-          reason: "Advanced regexp token downgraded to literal domain suffix."
+          reason: "Advanced regexp token downgraded to literal domain suffix.",
         };
       }
 
@@ -75,17 +80,19 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
         rules: [
           {
             type: "DOMAIN-WILDCARD",
-            value: "*"
-          }
+            value: "*",
+          },
         ],
-        reason: "Advanced regexp token downgraded to match-all wildcard in full mode."
+        reason:
+          "Advanced regexp token downgraded to match-all wildcard in full mode.",
       };
     }
 
     return {
       status: "unsupported",
       rules: [],
-      reason: "Pattern uses advanced regexp tokens that cannot be safely converted."
+      reason:
+        "Pattern uses advanced regexp tokens that cannot be safely converted.",
     };
   }
 
@@ -96,10 +103,10 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
       rules: [
         {
           type: "DOMAIN-WILDCARD",
-          value: wildcard
-        }
+          value: wildcard,
+        },
       ],
-      reason: "Regex converted to heuristic DOMAIN-WILDCARD pattern."
+      reason: "Regex converted to heuristic DOMAIN-WILDCARD pattern.",
     };
   }
 
@@ -111,10 +118,10 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
         rules: [
           {
             type: "DOMAIN-SUFFIX",
-            value: tail
-          }
+            value: tail,
+          },
         ],
-        reason: "Regex downgraded to literal domain suffix fallback."
+        reason: "Regex downgraded to literal domain suffix fallback.",
       };
     }
 
@@ -123,17 +130,17 @@ export function transpileRegexToSurge(pattern: string, mode: RegexMode): RegexTr
       rules: [
         {
           type: "DOMAIN-WILDCARD",
-          value: "*"
-        }
+          value: "*",
+        },
       ],
-      reason: "Regex downgraded to match-all wildcard in full mode."
+      reason: "Regex downgraded to match-all wildcard in full mode.",
     };
   }
 
   return {
     status: "unsupported",
     rules: [],
-    reason: "Unable to convert regexp into a valid Surge domain pattern."
+    reason: "Unable to convert regexp into a valid Egern domain pattern.",
   };
 }
 
@@ -170,7 +177,14 @@ function wildcardFromRegex(pattern: string): string | null {
         continue;
       }
 
-      if (next === "d" || next === "w" || next === "s" || next === "S" || next === "D" || next === "W") {
+      if (
+        next === "d" ||
+        next === "w" ||
+        next === "s" ||
+        next === "S" ||
+        next === "D" ||
+        next === "W"
+      ) {
         out += "*";
         continue;
       }
@@ -243,7 +257,9 @@ function normalizeWildcard(value: string): string {
   output = output.replace(/\?\*/g, "*");
   output = output.replace(/\*\?/g, "*");
   output = output.replace(/\.{2,}/g, ".");
-  output = output.replace(/^[*.]+/, (match) => (match.includes(".") ? "*." : "*"));
+  output = output.replace(/^[*.]+/, (match) =>
+    match.includes(".") ? "*." : "*",
+  );
   output = output.replace(/\*\./g, "*.");
   output = output.replace(/^\.+|\.+$/g, "");
   return output;

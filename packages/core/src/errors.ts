@@ -12,9 +12,9 @@ export class GeositeResolveError extends Error {
   }
 }
 
-export class SurgeEmitError extends Error {
+export class EgernEmitError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "SurgeEmitError";
+    this.name = "EgernEmitError";
   }
 }

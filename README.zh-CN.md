@@ -1,28 +1,28 @@
 <div align="center">
-  <h1>Surge Geosite</h1>
+  <h1>Egern Geosite</h1>
   <p>
     中文 | <a href="./README.md">English</a>
   </p>
-  <p>自动转换 <code>v2fly/domain-list-community</code> 数据集为 Surge 可直接使用的规则。</p>
+  <p>自动转换 <code>Loyalsoldier/v2ray-rules-dat</code> 数据集为 Egern 可直接使用的规则集。</p>
   <p>
-    <a href="https://surge.bojin.co"><strong>打开可视化面板</strong></a>
+    <a href="https://egern.slinet.moe"><strong>打开可视化面板</strong></a>
   </p>
 </div>
 
 <p align="center">
-  <img src="./docs/assets/panel-dashboard.png" alt="Surge Geosite 面板" width="600" />
+  <img src="./docs/assets/panel-dashboard.png" alt="Egern Geosite 面板" width="600" />
 </p>
 
 ## 直接使用
 
-1. 打开可视化面板：https://surge.bojin.co。
+1. 打开可视化面板：https://egern.slinet.moe。
 2. 搜索并选择数据集。
 3. 复制页面给出的原始链接。
-4. 粘贴到 Surge 规则中。
+4. 在 Egern 的 `rule_set` 规则中引用。
 
 如果你要直接使用规则链接，格式是：
 
-- 规则路径：`https://surge.bojin.co/geosite/:name_with_filter`
+- 规则路径：`https://egern.slinet.moe/geosite/:name_with_filter`
 
 `name_with_filter` 有两种：
 
@@ -31,12 +31,18 @@
 - 带 filter：`apple@cn`
   只返回带 `@cn` 标签的规则。
 
-Surge 引用示例：
+Egern 引用示例：
 
-```ini
-[Rule]
-RULE-SET,https://surge.bojin.co/geosite/apple@cn,DIRECT
-RULE-SET,https://surge.bojin.co/geosite/strict/category-ads-all,REJECT
+```yaml
+rules:
+  - rule_set:
+      match: "https://egern.slinet.moe/geosite/apple@cn"
+      policy: DIRECT
+      update_interval: 86400
+  - rule_set:
+      match: "https://egern.slinet.moe/geosite/strict/proxy-list"
+      policy: Proxy
+      update_interval: 86400
 ```
 
 ## 高级使用

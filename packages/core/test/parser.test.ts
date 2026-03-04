@@ -10,8 +10,8 @@ describe("parseListText", () => {
         "# comment",
         "domain:Google.com @cn @Ads &foo",
         "include:bar @cn @-ads",
-        "example.org # inline comment"
-      ].join("\n")
+        "example.org # inline comment",
+      ].join("\n"),
     );
 
     expect(entries).toHaveLength(3);
@@ -21,7 +21,7 @@ describe("parseListText", () => {
       value: "google.com",
       attrs: ["ads", "cn"],
       affiliations: ["FOO"],
-      plain: "domain:google.com:@ads,@cn"
+      plain: "domain:google.com:@ads,@cn",
     });
 
     expect(entries[1]).toMatchObject({
@@ -29,13 +29,13 @@ describe("parseListText", () => {
       sourceList: "BAR",
       attrs: ["-ads", "cn"],
       mustAttrs: ["cn"],
-      banAttrs: ["ads"]
+      banAttrs: ["ads"],
     });
 
     expect(entries[2]).toMatchObject({
       type: "domain",
       value: "example.org",
-      attrs: []
+      attrs: [],
     });
   });
 });

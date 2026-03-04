@@ -13,9 +13,13 @@ describe("resolveAllLists", () => {
         "keyword:needle",
         "regexp:(^|\\.)rx-only\\.com$",
         "include:b @cn @-ads",
-        "domain:seed.com &c"
+        "domain:seed.com &c",
       ].join("\n"),
-      b: ["domain:service.com @cn", "domain:ads.service.com @cn @ads", "full:api.service.com @cn"].join("\n")
+      b: [
+        "domain:service.com @cn",
+        "domain:ads.service.com @cn @ads",
+        "full:api.service.com @cn",
+      ].join("\n"),
     });
 
     const resolved = resolveAllLists(parsed);
@@ -26,16 +30,18 @@ describe("resolveAllLists", () => {
       "domain:service.com:@cn",
       "full:api.service.com:@cn",
       "keyword:needle",
-      "regexp:(^|\\.)rx-only\\.com$"
+      "regexp:(^|\\.)rx-only\\.com$",
     ]);
 
-    expect(resolved.C.entries.map((item) => item.plain)).toEqual(["domain:seed.com"]);
+    expect(resolved.C.entries.map((item) => item.plain)).toEqual([
+      "domain:seed.com",
+    ]);
   });
 
   test("detects circular includes", () => {
     const parsed = parseListsFromText({
       a: "include:b",
-      b: "include:a"
+      b: "include:a",
     });
 
     expect(() => resolveAllLists(parsed)).toThrow(GeositeResolveError);

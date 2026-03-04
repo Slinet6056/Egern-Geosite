@@ -1,5 +1,5 @@
 {
-  "name": "surge-geosite",
+  "name": "egern-geosite",
   "private": true,
   "packageManager": "pnpm@10.0.0",
   "scripts": {
@@ -7,19 +7,23 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "check": "pnpm typecheck && pnpm test",
-    "build:real": "pnpm --filter @surge-geosite/cli build && node ./packages/cli/dist/index.js build --data-dir ./domain-list-community/data --out-dir ./out",
-    "build:sample": "pnpm --filter @surge-geosite/cli build && node ./packages/cli/dist/index.js build --data-dir ./domain-list-community/data --list google,github --out-dir ./out-sample",
-    "panel:dev": "pnpm --filter @surge-geosite/panel run dev",
-    "panel:build": "pnpm --filter @surge-geosite/panel run build",
-    "panel:deploy": "pnpm --filter @surge-geosite/panel run cf:deploy",
-    "worker:dev": "pnpm --filter @surge-geosite/worker run cf:dev",
-    "worker:dev:cron": "pnpm --filter @surge-geosite/worker run cf:dev:cron",
-    "worker:deploy": "pnpm --filter @surge-geosite/worker run cf:deploy",
-    "worker:login": "pnpm --filter @surge-geosite/worker exec wrangler login",
-    "worker:r2:create": "pnpm --filter @surge-geosite/worker exec wrangler r2 bucket create surge-geosite"
+    "format": "pnpm exec prettier --plugin prettier-plugin-svelte --write . --ignore-unknown",
+    "format:check": "pnpm exec prettier --plugin prettier-plugin-svelte --check . --ignore-unknown",
+    "build:real": "pnpm --filter @egern-geosite/cli build && node ./packages/cli/dist/index.js build --data-dir ./domain-list-community/data --out-dir ./out",
+    "build:sample": "pnpm --filter @egern-geosite/cli build && node ./packages/cli/dist/index.js build --data-dir ./domain-list-community/data --list google,github --out-dir ./out-sample",
+    "panel:dev": "pnpm --filter @egern-geosite/panel run dev",
+    "panel:build": "pnpm --filter @egern-geosite/panel run build",
+    "panel:deploy": "pnpm --filter @egern-geosite/panel run cf:deploy",
+    "worker:dev": "pnpm --filter @egern-geosite/worker run cf:dev",
+    "worker:dev:cron": "pnpm --filter @egern-geosite/worker run cf:dev:cron",
+    "worker:deploy": "pnpm --filter @egern-geosite/worker run cf:deploy",
+    "worker:login": "pnpm --filter @egern-geosite/worker exec wrangler login",
+    "worker:r2:create": "pnpm --filter @egern-geosite/worker exec wrangler r2 bucket create egern-geosite"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
+    "prettier": "^3.8.1",
+    "prettier-plugin-svelte": "^3.5.1",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"
   }

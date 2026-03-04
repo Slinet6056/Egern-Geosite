@@ -3,7 +3,9 @@ import path from "node:path";
 
 const VALID_LIST_FILE_NAME = /^[a-z0-9!-]+$/;
 
-export async function loadListsFromDirectory(dataDir: string): Promise<Record<string, string>> {
+export async function loadListsFromDirectory(
+  dataDir: string,
+): Promise<Record<string, string>> {
   const entries = await readdir(dataDir, { withFileTypes: true });
   const files = entries
     .filter((entry) => entry.isFile() && VALID_LIST_FILE_NAME.test(entry.name))

@@ -1,13 +1,13 @@
 import type {
   DomainRule,
-  EmitSurgeResult,
+  EmitEgernResult,
   GlobalStats,
   ListStats,
   ModeStats,
   RegexMode,
   ResolvedCounts,
   SourceCounts,
-  SourceEntry
+  SourceEntry,
 } from "./types.js";
 
 const MODES: RegexMode[] = ["strict", "balanced", "full"];
@@ -41,7 +41,9 @@ export function countResolvedEntries(entries: DomainRule[]): ResolvedCounts {
   return counts;
 }
 
-export function countFilterAttrs(entries: DomainRule[]): Record<string, number> {
+export function countFilterAttrs(
+  entries: DomainRule[],
+): Record<string, number> {
   const attrs: Record<string, number> = {};
 
   for (const entry of entries) {
@@ -53,12 +55,12 @@ export function countFilterAttrs(entries: DomainRule[]): Record<string, number> 
   return attrs;
 }
 
-export function modeStatsFromEmit(result: EmitSurgeResult): ModeStats {
+export function modeStatsFromEmit(result: EmitEgernResult): ModeStats {
   return {
     rules: result.lines.length,
     bytes: byteLengthUtf8(result.text),
     regex: { ...result.report.regex },
-    unsupported: [...result.report.unsupported]
+    unsupported: [...result.report.unsupported],
   };
 }
 
@@ -70,8 +72,8 @@ export function aggregateGlobalStats(lists: ListStats[]): GlobalStats {
     modes: {
       strict: makeEmptyModeStats(),
       balanced: makeEmptyModeStats(),
-      full: makeEmptyModeStats()
-    }
+      full: makeEmptyModeStats(),
+    },
   };
 
   for (const list of lists) {
@@ -107,7 +109,10 @@ function mergeSourceCounts(target: SourceCounts, incoming: SourceCounts): void {
   target.attributes += incoming.attributes;
 }
 
-function mergeResolvedCounts(target: ResolvedCounts, incoming: ResolvedCounts): void {
+function mergeResolvedCounts(
+  target: ResolvedCounts,
+  incoming: ResolvedCounts,
+): void {
   target.rules += incoming.rules;
   target.domain += incoming.domain;
   target.full += incoming.full;
@@ -123,7 +128,7 @@ function makeEmptySourceCounts(): SourceCounts {
     regexp: 0,
     include: 0,
     affiliations: 0,
-    attributes: 0
+    attributes: 0,
   };
 }
 
@@ -133,7 +138,7 @@ function makeEmptyResolvedCounts(): ResolvedCounts {
     domain: 0,
     full: 0,
     keyword: 0,
-    regexp: 0
+    regexp: 0,
   };
 }
 
@@ -145,7 +150,7 @@ function makeEmptyModeStats(): Omit<ModeStats, "unsupported"> {
       total: 0,
       lossless: 0,
       widened: 0,
-      unsupported: 0
-    }
+      unsupported: 0,
+    },
   };
 }

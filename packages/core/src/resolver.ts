@@ -1,6 +1,11 @@
 import { GeositeResolveError } from "./errors.js";
 import { normalizeListName } from "./parser.js";
-import type { DomainRule, IncludeRule, ResolvedList, SourceEntry } from "./types.js";
+import type {
+  DomainRule,
+  IncludeRule,
+  ResolvedList,
+  SourceEntry,
+} from "./types.js";
 
 interface Inclusion {
   source: string;
@@ -14,7 +19,9 @@ interface WorkingList {
   rules: DomainRule[];
 }
 
-export function resolveAllLists(parsed: Record<string, SourceEntry[]>): Record<string, ResolvedList> {
+export function resolveAllLists(
+  parsed: Record<string, SourceEntry[]>,
+): Record<string, ResolvedList> {
   const workingMap = buildWorkingMap(parsed);
   const resolved = new Map<string, ResolvedList>();
 
@@ -34,7 +41,10 @@ export function resolveAllLists(parsed: Record<string, SourceEntry[]>): Record<s
   return output;
 }
 
-export function resolveOneList(parsed: Record<string, SourceEntry[]>, listName: string): ResolvedList {
+export function resolveOneList(
+  parsed: Record<string, SourceEntry[]>,
+  listName: string,
+): ResolvedList {
   const normalized = normalizeListName(listName);
   const resolved = resolveAllLists(parsed);
   const target = resolved[normalized];
@@ -44,7 +54,9 @@ export function resolveOneList(parsed: Record<string, SourceEntry[]>, listName: 
   return target;
 }
 
-function buildWorkingMap(parsed: Record<string, SourceEntry[]>): Map<string, WorkingList> {
+function buildWorkingMap(
+  parsed: Record<string, SourceEntry[]>,
+): Map<string, WorkingList> {
   const map = new Map<string, WorkingList>();
 
   for (const listName of Object.keys(parsed)) {
@@ -76,11 +88,14 @@ function registerInclusion(list: WorkingList, includeRule: IncludeRule): void {
   list.inclusions.push({
     source: includeRule.sourceList,
     mustAttrs: includeRule.mustAttrs,
-    banAttrs: includeRule.banAttrs
+    banAttrs: includeRule.banAttrs,
   });
 }
 
-function ensureWorkingList(map: Map<string, WorkingList>, name: string): WorkingList {
+function ensureWorkingList(
+  map: Map<string, WorkingList>,
+  name: string,
+): WorkingList {
   const existing = map.get(name);
   if (existing) {
     return existing;
@@ -89,7 +104,7 @@ function ensureWorkingList(map: Map<string, WorkingList>, name: string): Working
   const created: WorkingList = {
     name,
     inclusions: [],
-    rules: []
+    rules: [],
   };
   map.set(name, created);
   return created;
@@ -99,14 +114,16 @@ function resolveList(
   name: string,
   workingMap: Map<string, WorkingList>,
   resolved: Map<string, ResolvedList>,
-  stack: string[]
+  stack: string[],
 ): void {
   if (resolved.has(name)) {
     return;
   }
 
   if (stack.includes(name)) {
-    throw new GeositeResolveError(`circular inclusion detected: ${[...stack, name].join(" -> ")}`);
+    throw new GeositeResolveError(
+      `circular inclusion detected: ${[...stack, name].join(" -> ")}`,
+    );
   }
 
   const list = workingMap.get(name);
@@ -121,14 +138,18 @@ function resolveList(
 
   for (const inclusion of list.inclusions) {
     if (!workingMap.has(inclusion.source)) {
-      throw new GeositeResolveError(`list ${name} includes a non-existent list: ${inclusion.source}`);
+      throw new GeositeResolveError(
+        `list ${name} includes a non-existent list: ${inclusion.source}`,
+      );
     }
 
     resolveList(inclusion.source, workingMap, resolved, [...stack, name]);
     const included = resolved.get(inclusion.source);
 
     if (!included) {
-      throw new GeositeResolveError(`failed to resolve list: ${inclusion.source}`);
+      throw new GeositeResolveError(
+        `failed to resolve list: ${inclusion.source}`,
+      );
     }
 
     for (const entry of included.entries) {
@@ -140,7 +161,7 @@ function resolveList(
 
   resolved.set(name, {
     name,
-    entries: polishRules(Array.from(rough.values()))
+    entries: polishRules(Array.from(rough.values())),
   });
 }
 
@@ -200,7 +221,8 @@ function polishRules(rules: DomainRule[]): DomainRule[] {
   }
 
   for (const queuedRule of queuedRules) {
-    let parentDomain = queuedRule.type === "full" ? `.${queuedRule.value}` : queuedRule.value;
+    let parentDomain =
+      queuedRule.type === "full" ? `.${queuedRule.value}` : queuedRule.value;
     let redundant = false;
 
     while (true) {

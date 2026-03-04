@@ -1,4 +1,4 @@
-# Surge Geosite Architecture
+# Egern Geosite Architecture
 
 This document keeps the technical runtime/ops details for maintainers and contributors.
 
@@ -15,17 +15,17 @@ Production uses two Cloudflare Workers on the same domain:
 
 Recommended route priority:
 
-1. `surge.bojin.co/geosite*` -> API Worker
-2. `surge.bojin.co/*` -> Panel Worker
+1. `egern.slinet.moe/geosite*` -> API Worker
+2. `egern.slinet.moe` (Custom Domain) -> Panel Worker
 
 ## Refresh Pipeline
 
 1. Cron runs every 5 minutes.
-2. Worker sends `HEAD` to upstream ZIP (`v2fly/domain-list-community`).
+2. Worker sends `HEAD` to upstream ZIP (`Loyalsoldier/v2ray-rules-dat`, release branch ZIP).
 3. If ETag unchanged: only update check timestamp.
 4. If ETag changed:
    - Download ZIP once.
-   - Extract `data/*` sources.
+   - Parse `geosite.dat` into source lists.
    - Validate parse/resolve.
    - Write snapshot and index to R2.
    - Atomically switch `state/latest.json`.
@@ -33,7 +33,7 @@ Recommended route priority:
 ## Serve Pipeline
 
 1. Read `state/latest.json`.
-2. Try `artifacts/{etag}/{mode}/{name[@filter]}.txt`.
+2. Try `artifacts/{etag}/{mode}/{name[@filter]}.yaml`.
 3. If hit: return immediately.
 4. If miss:
    - Optionally return stale artifact from previous ETag (non-filter path), then rebuild latest in background.
@@ -61,7 +61,7 @@ Recommended route priority:
 - `state/latest.json`
 - `snapshots/{etag}/sources.json.gz`
 - `snapshots/{etag}/index/geosite.json`
-- `artifacts/{etag}/{mode}/{name[@filter]}.txt`
+- `artifacts/{etag}/{mode}/{name[@filter]}.yaml`
 
 ## Operations
 

@@ -10,7 +10,7 @@ describe("parseCliArgs", () => {
       "./data",
       "--list=google,github",
       "extra",
-      "--report-json"
+      "--report-json",
     ]);
 
     expect(parsed.command).toBe("build");

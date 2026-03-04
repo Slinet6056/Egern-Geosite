@@ -1,28 +1,28 @@
 <div align="center">
-  <h1>Surge Geosite</h1>
-  <p>Automatically converts <code>v2fly/domain-list-community</code> datasets into ready-to-use Surge rules.</p>
+  <h1>Egern Geosite</h1>
+  <p>Automatically converts <code>Loyalsoldier/v2ray-rules-dat</code> datasets into ready-to-use Egern rule sets.</p>
   <p>
     English | <a href="./README.zh-CN.md">中文</a>
   </p>
   <p>
-    <a href="https://surge.bojin.co"><strong>Open Dashboard</strong></a>
+    <a href="https://egern.slinet.moe"><strong>Open Dashboard</strong></a>
   </p>
 </div>
 
 <p align="center">
-  <img src="./docs/assets/panel-dashboard.png" alt="Surge Geosite Dashboard" />
+  <img src="./docs/assets/panel-dashboard.png" alt="Egern Geosite Dashboard" />
 </p>
 
 ## Direct Use
 
-1. Open the dashboard: https://surge.bojin.co.
+1. Open the dashboard: https://egern.slinet.moe.
 2. Search and select a dataset.
 3. Copy the generated raw URL.
-4. Paste it into your Surge rules.
+4. Reference it in your Egern `rule_set` rule.
 
 If you want to use rule URLs directly, the format is:
 
-- Rules path: `https://surge.bojin.co/geosite/:name_with_filter`
+- Rules path: `https://egern.slinet.moe/geosite/:name_with_filter`
 
 `name_with_filter` has two forms:
 
@@ -31,12 +31,18 @@ If you want to use rule URLs directly, the format is:
 - With filter: `apple@cn`
   Returns only rules tagged with `@cn`.
 
-Surge example:
+Egern example:
 
-```ini
-[Rule]
-RULE-SET,https://surge.bojin.co/geosite/apple@cn,DIRECT
-RULE-SET,https://surge.bojin.co/geosite/strict/category-ads-all,REJECT
+```yaml
+rules:
+  - rule_set:
+      match: "https://egern.slinet.moe/geosite/apple@cn"
+      policy: DIRECT
+      update_interval: 86400
+  - rule_set:
+      match: "https://egern.slinet.moe/geosite/strict/proxy-list"
+      policy: Proxy
+      update_interval: 86400
 ```
 
 ## Advanced Usage

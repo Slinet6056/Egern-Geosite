@@ -42,12 +42,18 @@ export function parseCliArgs(argv: string[]): CliArgs {
   return { command, flags, positionals };
 }
 
-export function getStringFlag(flags: Record<string, string | boolean>, key: string): string | undefined {
+export function getStringFlag(
+  flags: Record<string, string | boolean>,
+  key: string,
+): string | undefined {
   const value = flags[key];
   return typeof value === "string" ? value : undefined;
 }
 
-export function getBooleanFlag(flags: Record<string, string | boolean>, key: string): boolean {
+export function getBooleanFlag(
+  flags: Record<string, string | boolean>,
+  key: string,
+): boolean {
   const value = flags[key];
   return value === true;
 }

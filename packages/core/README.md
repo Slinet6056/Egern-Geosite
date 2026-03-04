@@ -1,6 +1,6 @@
-# @surge-geosite/core
+# @egern-geosite/core
 
-Core library for converting geosite-style lists into Surge ruleset lines.
+Core library for converting geosite-style lists into Egern ruleset YAML.
 
 ## Design
 
@@ -8,8 +8,8 @@ The package is intentionally split into four pure stages:
 
 1. `parser`: parse list text into typed entries (`domain/full/keyword/regexp/include`) with source locations.
 2. `resolver`: apply affiliation and include graph resolution, attribute filters, dedupe and redundancy polish.
-3. `regex`: convert regex rules to Surge-compatible rules under explicit modes (`strict`, `balanced`, `full`).
-4. `surge`: emit final `DOMAIN-SUFFIX / DOMAIN / DOMAIN-KEYWORD / DOMAIN-WILDCARD` lines with conversion report.
+3. `regex`: convert regex rules to compatible domain match patterns under explicit modes (`strict`, `balanced`, `full`).
+4. `egern`: emit final Egern ruleset YAML (`domain_set / domain_suffix_set / domain_keyword_set / domain_wildcard_set`) with conversion report.
 
 No filesystem or network access is required in core APIs.
 
@@ -19,8 +19,8 @@ No filesystem or network access is required in core APIs.
 - `parseListsFromText(record)`
 - `resolveAllLists(parsed)`
 - `resolveOneList(parsed, listName)`
-- `transpileRegexToSurge(pattern, mode)`
-- `emitSurgeRuleset(resolvedList, options)`
+- `transpileRegexToEgern(pattern, mode)`
+- `emitEgernRuleset(resolvedList, options)` (returns Egern ruleset YAML text)
 - `buildResolvedListsFromText(record)`
 
 ## Regex Modes

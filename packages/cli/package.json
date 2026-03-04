@@ -1,19 +1,19 @@
 {
-  "name": "@surge-geosite/cli",
+  "name": "@egern-geosite/cli",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "surge-geosite": "./dist/index.js"
+    "egern-geosite": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "pnpm --filter @surge-geosite/core build && tsc -p tsconfig.json",
-    "typecheck": "pnpm --filter @surge-geosite/core build && tsc -p tsconfig.json --noEmit",
-    "test": "pnpm --filter @surge-geosite/core build && vitest run"
+    "build": "pnpm --filter @egern-geosite/core build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @egern-geosite/core build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @egern-geosite/core build && vitest run"
   },
   "dependencies": {
-    "@surge-geosite/core": "workspace:*"
+    "@egern-geosite/core": "workspace:*"
   }
 }

@@ -1,12 +1,12 @@
 #:schema ../../node_modules/wrangler/config-schema.json
 
-name = "surge-geosite-panel"
+name = "egern-geosite-panel"
 main = ".svelte-kit/cloudflare/_worker.js"
 compatibility_date = "2026-03-02"
 workers_dev = true
 compatibility_flags = ["nodejs_compat"]
 routes = [
-  { pattern = "surge.bojin.co/*", zone_name = "bojin.co" }
+  { pattern = "egern.slinet.moe", custom_domain = true }
 ]
 
 [assets]
@@ -15,4 +15,4 @@ binding = "ASSETS"
 
 [[services]]
 binding = "GEOSITE_API"
-service = "surge-geosite"
+service = "egern-geosite"
