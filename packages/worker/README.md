@@ -5,8 +5,10 @@ Cloudflare Worker runtime for geosite API serving with built-in cron refresh.
 ## Endpoints
 
 - `GET /geosite`
-- `GET /geosite/:name_with_filter` (default mode: `balanced`)
-- `GET /geosite/:mode/:name_with_filter` where mode is `strict|balanced|full`
+- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml` (default mode: `balanced`)
+- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml` where mode is `strict|balanced|full`
+- `GET /geosite-srs/:name` or `GET /geosite-srs/:name.srs`
+- `GET /geosite-mrs/:name` or `GET /geosite-mrs/:name.mrs`
 
 ## Runtime Model
 

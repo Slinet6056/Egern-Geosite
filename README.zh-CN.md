@@ -22,7 +22,8 @@
 
 如果你要直接使用规则链接，格式是：
 
-- 规则路径：`https://egern.slinet.moe/geosite/:name_with_filter`
+- 推荐规则路径：`https://egern.slinet.moe/geosite/:name_with_filter.yaml`
+- 兼容路径（同样可用）：`https://egern.slinet.moe/geosite/:name_with_filter`
 
 `name_with_filter` 有两种：
 
@@ -36,11 +37,11 @@ Egern 引用示例：
 ```yaml
 rules:
   - rule_set:
-      match: "https://egern.slinet.moe/geosite/apple@cn"
+      match: "https://egern.slinet.moe/geosite/apple@cn.yaml"
       policy: DIRECT
       update_interval: 86400
   - rule_set:
-      match: "https://egern.slinet.moe/geosite/strict/proxy-list"
+      match: "https://egern.slinet.moe/geosite/strict/proxy-list.yaml"
       policy: Proxy
       update_interval: 86400
 ```
@@ -50,8 +51,10 @@ rules:
 ### API
 
 - `GET /geosite`
-- `GET /geosite/:name_with_filter`（默认模式：`balanced`）
-- `GET /geosite/:mode/:name_with_filter`
+- `GET /geosite/:name_with_filter` 或 `GET /geosite/:name_with_filter.yaml`（默认模式：`balanced`）
+- `GET /geosite/:mode/:name_with_filter` 或 `GET /geosite/:mode/:name_with_filter.yaml`
+- `GET /geosite-srs/:name` 或 `GET /geosite-srs/:name.srs`
+- `GET /geosite-mrs/:name` 或 `GET /geosite-mrs/:name.mrs`
 
 ### 模式说明
 

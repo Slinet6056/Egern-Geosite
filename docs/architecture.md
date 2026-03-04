@@ -42,8 +42,10 @@ Recommended route priority:
 ## API Surface
 
 - `GET /geosite`
-- `GET /geosite/:name_with_filter` (default mode: `balanced`)
-- `GET /geosite/:mode/:name_with_filter`
+- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml` (default mode: `balanced`)
+- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml`
+- `GET /geosite-srs/:name` or `GET /geosite-srs/:name.srs`
+- `GET /geosite-mrs/:name` or `GET /geosite-mrs/:name.mrs`
 
 `name_with_filter` format:
 

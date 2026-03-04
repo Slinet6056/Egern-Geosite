@@ -22,7 +22,8 @@
 
 If you want to use rule URLs directly, the format is:
 
-- Rules path: `https://egern.slinet.moe/geosite/:name_with_filter`
+- Recommended rules path: `https://egern.slinet.moe/geosite/:name_with_filter.yaml`
+- Compatibility path (also valid): `https://egern.slinet.moe/geosite/:name_with_filter`
 
 `name_with_filter` has two forms:
 
@@ -36,11 +37,11 @@ Egern example:
 ```yaml
 rules:
   - rule_set:
-      match: "https://egern.slinet.moe/geosite/apple@cn"
+      match: "https://egern.slinet.moe/geosite/apple@cn.yaml"
       policy: DIRECT
       update_interval: 86400
   - rule_set:
-      match: "https://egern.slinet.moe/geosite/strict/proxy-list"
+      match: "https://egern.slinet.moe/geosite/strict/proxy-list.yaml"
       policy: Proxy
       update_interval: 86400
 ```
@@ -50,8 +51,10 @@ rules:
 ### API
 
 - `GET /geosite`
-- `GET /geosite/:name_with_filter` (default mode: `balanced`)
-- `GET /geosite/:mode/:name_with_filter`
+- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml` (default mode: `balanced`)
+- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml`
+- `GET /geosite-srs/:name` or `GET /geosite-srs/:name.srs`
+- `GET /geosite-mrs/:name` or `GET /geosite-mrs/:name.mrs`
 
 ### Mode Guide
 
