@@ -10,12 +10,18 @@
           "(prefers-color-scheme: dark)",
         ).matches;
 
+        const applyThemeClasses = (dark) => {
+          document.documentElement.classList.toggle("dark", dark);
+          document.documentElement.classList.toggle("latte", !dark);
+          document.documentElement.classList.toggle("macchiato", dark);
+        };
+
         try {
           const stored = window.localStorage.getItem(storageKey);
           const dark = stored === "dark" || (stored !== "light" && prefersDark);
-          document.documentElement.classList.toggle("dark", dark);
+          applyThemeClasses(dark);
         } catch {
-          document.documentElement.classList.toggle("dark", prefersDark);
+          applyThemeClasses(prefersDark);
         }
       })();
     </script>

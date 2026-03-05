@@ -37,6 +37,9 @@ importers:
         specifier: ^0.576.0
         version: 0.576.0(svelte@5.53.6)
     devDependencies:
+      "@catppuccin/tailwindcss":
+        specifier: ^1.0.0
+        version: 1.0.0
       "@internationalized/date":
         specifier: ^3.11.0
         version: 3.11.0
@@ -100,6 +103,13 @@ importers:
         version: 4.65.0(@cloudflare/workers-types@4.20260301.1)
 
 packages:
+  "@catppuccin/tailwindcss@1.0.0":
+    resolution:
+      {
+        integrity: sha512-l8pOlcYe2ncGd8a1gUmL5AHmKlxR2+CHuG5kt4Me6IZwzntW1DoLmj89BH+DcsPHBsdDGLrTSv35emlYyU3FeQ==,
+      }
+    engines: { node: ">=22.0.0" }
+
   "@cloudflare/kv-asset-handler@0.4.2":
     resolution:
       {
@@ -2157,6 +2167,8 @@ packages:
       }
 
 snapshots:
+  "@catppuccin/tailwindcss@1.0.0": {}
+
   "@cloudflare/kv-asset-handler@0.4.2": {}
 
   "@cloudflare/unenv-preset@2.12.1(unenv@2.0.0-rc.24)(workerd@1.20260212.0)":

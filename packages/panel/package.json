@@ -13,6 +13,7 @@
     "cf:deploy": "pnpm run build && wrangler deploy"
   },
   "devDependencies": {
+    "@catppuccin/tailwindcss": "^1.0.0",
     "@internationalized/date": "^3.11.0",
     "@sveltejs/adapter-cloudflare": "^7.2.2",
     "@sveltejs/kit": "^2.50.2",

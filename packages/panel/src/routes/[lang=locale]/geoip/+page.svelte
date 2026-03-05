@@ -177,7 +177,10 @@
     }
 
     resolvedTheme = resolveTheme(preference);
-    document.documentElement.classList.toggle("dark", resolvedTheme === "dark");
+    const isDark = resolvedTheme === "dark";
+    document.documentElement.classList.toggle("dark", isDark);
+    document.documentElement.classList.toggle("latte", !isDark);
+    document.documentElement.classList.toggle("macchiato", isDark);
   }
 
   function setThemePreference(next: ThemePreference) {
