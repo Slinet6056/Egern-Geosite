@@ -63,9 +63,26 @@ async function runBuild(
     return 1;
   }
 
-  const sourceRecord = await loadListsFromDirectory(
-    path.resolve(process.cwd(), dataDir),
-  );
+  const resolvedDataDir = path.resolve(process.cwd(), dataDir);
+  let sourceRecord: Record<string, string>;
+  try {
+    sourceRecord = await loadListsFromDirectory(resolvedDataDir);
+  } catch (error: unknown) {
+    if (hasErrorCode(error, "ENOENT")) {
+      console.error(
+        `data directory not found: ${resolvedDataDir}\n` +
+          "hint: pass --data-dir pointing to v2ray-rules-dat (release branch clone).",
+      );
+      return 1;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `failed to read data directory ${resolvedDataDir}: ${message}`,
+    );
+    return 1;
+  }
+
   const parsed = parseListsFromText(sourceRecord);
   const resolved = resolveAllLists(parsed);
 
@@ -196,6 +213,14 @@ async function runBuild(
   );
   console.log(`default mode path: ${path.join(outDir, "rules", "balanced")}`);
   return 0;
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+
+  return (error as { code?: unknown }).code === code;
 }
 
 function splitListArg(input: string): string[] {

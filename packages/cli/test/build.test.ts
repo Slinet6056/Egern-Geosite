@@ -57,4 +57,48 @@ describe("runCli build", () => {
     expect(meta).toContain('"defaultMode": "balanced"');
     expect(globalStats).toContain('"lists": 1');
   });
+
+  test("returns code 1 when data directory does not exist", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "geosite-build-"));
+    const missingDataDir = path.join(root, "missing-data");
+    const outDir = path.join(root, "out");
+
+    const code = await runCli([
+      "build",
+      "--data-dir",
+      missingDataDir,
+      "--out-dir",
+      outDir,
+    ]);
+
+    expect(code).toBe(1);
+  });
+
+  test("accepts v2ray-rules-dat style .txt list files", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "geosite-build-"));
+    const dataDir = path.join(root, "v2ray-rules-dat");
+    const outDir = path.join(root, "out");
+
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "direct-list.txt"),
+      "domain:example.com\n",
+      "utf8",
+    );
+
+    const code = await runCli([
+      "build",
+      "--data-dir",
+      dataDir,
+      "--out-dir",
+      outDir,
+    ]);
+
+    expect(code).toBe(0);
+    const balanced = await readFile(
+      path.join(outDir, "rules", "balanced", "direct-list.yaml"),
+      "utf8",
+    );
+    expect(balanced).toContain('"example.com"');
+  });
 });
