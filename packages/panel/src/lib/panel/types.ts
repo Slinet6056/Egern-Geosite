@@ -20,6 +20,14 @@ export interface GeoipIndexItem {
 
 export type GeoipIndex = Record<string, GeoipIndexItem>;
 
+export interface RuleMatchCounts {
+  exact: number;
+  keyword: number;
+  suffix: number;
+  regexp: number;
+  wildcard: number;
+}
+
 export interface RulesMeta {
   etag: string;
   stale: boolean;

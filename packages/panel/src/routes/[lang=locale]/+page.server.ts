@@ -1,9 +1,17 @@
 import { buildRulesPublicPath } from "$lib/panel/api";
 import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
 import { t } from "$lib/panel/i18n";
-import { countRuleLines, normalizeEtag } from "$lib/panel/utils";
+import {
+  countRuleLines,
+  countRuleMatchTypes,
+  normalizeEtag,
+} from "$lib/panel/utils";
 
-import type { GeositeIndex, PanelLocale } from "$lib/panel/types";
+import type {
+  GeositeIndex,
+  PanelLocale,
+  RuleMatchCounts,
+} from "$lib/panel/types";
 import type { PageServerLoad } from "./$types";
 
 const RULES_CACHE_LIMIT = 64;
@@ -20,6 +28,7 @@ type RulesCacheEntry = {
   etag: string;
   stale: boolean;
   ruleLines: string;
+  ruleTypeCounts: RuleMatchCounts;
 };
 
 let indexCache: IndexCacheEntry | null = null;
@@ -116,6 +125,7 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
   let etag = "-";
   let stale = "-";
   let ruleLines = "-";
+  let ruleTypeCounts: RuleMatchCounts | null = null;
   let rawLink = "#";
   let initError: string | null = null;
 
@@ -157,6 +167,7 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
         etag = cachedRules.etag;
         stale = cachedRules.stale ? tr("yes") : tr("no");
         ruleLines = cachedRules.ruleLines;
+        ruleTypeCounts = cachedRules.ruleTypeCounts;
       } else {
         const rulesResponse = await fetch(
           `/geosite/${encodeURIComponent(selected)}`,
@@ -180,11 +191,13 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
         } else {
           previewText = rulesText.length === 0 ? tr("emptyResult") : rulesText;
           ruleLines = String(countRuleLines(rulesText));
+          ruleTypeCounts = countRuleMatchTypes(rulesText);
           rulesCache.set(rulesKey, {
             text: rulesText,
             etag: normalizeEtag(upstreamEtag),
             stale: rulesResponse.headers.get("x-stale") === "1",
             ruleLines,
+            ruleTypeCounts,
           });
           pruneRulesCache();
         }
@@ -205,6 +218,7 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
     etag,
     stale,
     ruleLines,
+    ruleTypeCounts,
     rawLink,
     initError,
   };

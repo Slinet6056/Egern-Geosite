@@ -8,8 +8,16 @@
   import { buildRulesApiPath, buildRulesPublicPath } from "$lib/panel/api";
   import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
   import { t } from "$lib/panel/i18n";
-  import type { GeositeIndex, PanelLocale } from "$lib/panel/types";
-  import { countRuleLines, normalizeEtag } from "$lib/panel/utils";
+  import type {
+    GeositeIndex,
+    PanelLocale,
+    RuleMatchCounts,
+  } from "$lib/panel/types";
+  import {
+    countRuleLines,
+    countRuleMatchTypes,
+    normalizeEtag,
+  } from "$lib/panel/utils";
 
   import {
     Alert,
@@ -52,6 +60,7 @@
   let etag: string;
   let stale: string;
   let ruleLines: string;
+  let ruleTypeCounts: RuleMatchCounts | null;
   let rawLink: string;
   let isIndexLoading: boolean;
   let isRulesLoading: boolean;
@@ -99,6 +108,7 @@
     etag = next.etag ?? "-";
     stale = next.stale ?? "-";
     ruleLines = next.ruleLines ?? "-";
+    ruleTypeCounts = next.ruleTypeCounts ?? null;
     rawLink = next.rawLink ?? "#";
     isIndexLoading = false;
     isRulesLoading = false;
@@ -189,6 +199,7 @@
     etag = "-";
     stale = "-";
     ruleLines = "-";
+    ruleTypeCounts = null;
   }
 
   function resolveTheme(preference: ThemePreference): "light" | "dark" {
@@ -285,6 +296,7 @@
 
       previewText = body.length === 0 ? tr("emptyResult") : body;
       ruleLines = String(countRuleLines(body));
+      ruleTypeCounts = countRuleMatchTypes(body);
     } catch (error) {
       if (token !== loadToken) {
         return;
@@ -747,10 +759,42 @@
                 <span>{tr("sourceFile")} </span>
                 <span class="font-mono">{selectedInfo?.sourceFile ?? "-"}</span>
               </p>
-              <p>
-                <span>{tr("filterCount")} </span>
-                <span class="font-mono">{availableFilters.length}</span>
-              </p>
+              {#if availableFilters.length > 0}
+                <p>
+                  <span>{tr("filterCount")} </span>
+                  <span class="font-mono">{availableFilters.length}</span>
+                </p>
+              {/if}
+              {#if (ruleTypeCounts?.exact ?? 0) > 0}
+                <p>
+                  <span>{tr("exactMatchRules")} </span>
+                  <span class="font-mono">{ruleTypeCounts?.exact}</span>
+                </p>
+              {/if}
+              {#if (ruleTypeCounts?.keyword ?? 0) > 0}
+                <p>
+                  <span>{tr("keywordMatchRules")} </span>
+                  <span class="font-mono">{ruleTypeCounts?.keyword}</span>
+                </p>
+              {/if}
+              {#if (ruleTypeCounts?.suffix ?? 0) > 0}
+                <p>
+                  <span>{tr("suffixMatchRules")} </span>
+                  <span class="font-mono">{ruleTypeCounts?.suffix}</span>
+                </p>
+              {/if}
+              {#if (ruleTypeCounts?.regexp ?? 0) > 0}
+                <p>
+                  <span>{tr("regexMatchRules")} </span>
+                  <span class="font-mono">{ruleTypeCounts?.regexp}</span>
+                </p>
+              {/if}
+              {#if (ruleTypeCounts?.wildcard ?? 0) > 0}
+                <p>
+                  <span>{tr("wildcardMatchRules")} </span>
+                  <span class="font-mono">{ruleTypeCounts?.wildcard}</span>
+                </p>
+              {/if}
             </div>
           </section>
 
