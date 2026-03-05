@@ -9,9 +9,6 @@ routes = [
   { pattern = "egern.slinet.moe", custom_domain = true }
 ]
 
-[observability]
-enabled = true
-
 [assets]
 directory = ".svelte-kit/cloudflare"
 binding = "ASSETS"

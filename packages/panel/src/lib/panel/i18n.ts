@@ -5,8 +5,7 @@ const messages = {
     appTitle: "Egern Geosite",
     appSubTitle: "把上游 geosite 数据集转换为 Egern 可用规则集，开箱即用。",
     geoipAppTitle: "Egern GeoIP",
-    geoipAppSubTitle:
-      "把上游 geoip 数据集转换为 Egern 可用规则集，开箱即用。",
+    geoipAppSubTitle: "把上游 geoip 数据集转换为 Egern 可用规则集，开箱即用。",
     pageGeosite: "Geosite",
     pageGeoip: "GeoIP",
     datasets: "数据集列表",
