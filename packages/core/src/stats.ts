@@ -3,14 +3,11 @@ import type {
   EmitEgernResult,
   GlobalStats,
   ListStats,
-  ModeStats,
-  RegexMode,
+  OutputStats,
   ResolvedCounts,
   SourceCounts,
   SourceEntry,
 } from "./types.js";
-
-const MODES: RegexMode[] = ["strict", "balanced", "full"];
 
 export function countSourceEntries(entries: SourceEntry[]): SourceCounts {
   const counts = makeEmptySourceCounts();
@@ -55,12 +52,11 @@ export function countFilterAttrs(
   return attrs;
 }
 
-export function modeStatsFromEmit(result: EmitEgernResult): ModeStats {
+export function outputStatsFromEmit(result: EmitEgernResult): OutputStats {
   return {
     rules: result.lines.length,
     bytes: byteLengthUtf8(result.text),
     regex: { ...result.report.regex },
-    unsupported: [...result.report.unsupported],
   };
 }
 
@@ -69,27 +65,17 @@ export function aggregateGlobalStats(lists: ListStats[]): GlobalStats {
     lists: lists.length,
     source: makeEmptySourceCounts(),
     resolved: makeEmptyResolvedCounts(),
-    modes: {
-      strict: makeEmptyModeStats(),
-      balanced: makeEmptyModeStats(),
-      full: makeEmptyModeStats(),
-    },
+    output: makeEmptyOutputStats(),
   };
 
   for (const list of lists) {
     mergeSourceCounts(global.source, list.source);
     mergeResolvedCounts(global.resolved, list.resolved);
 
-    for (const mode of MODES) {
-      const target = global.modes[mode];
-      const incoming = list.modes[mode];
-      target.rules += incoming.rules;
-      target.bytes += incoming.bytes;
-      target.regex.total += incoming.regex.total;
-      target.regex.lossless += incoming.regex.lossless;
-      target.regex.widened += incoming.regex.widened;
-      target.regex.unsupported += incoming.regex.unsupported;
-    }
+    global.output.rules += list.output.rules;
+    global.output.bytes += list.output.bytes;
+    global.output.regex.total += list.output.regex.total;
+    global.output.regex.emitted += list.output.regex.emitted;
   }
 
   return global;
@@ -142,15 +128,13 @@ function makeEmptyResolvedCounts(): ResolvedCounts {
   };
 }
 
-function makeEmptyModeStats(): Omit<ModeStats, "unsupported"> {
+function makeEmptyOutputStats(): OutputStats {
   return {
     rules: 0,
     bytes: 0,
     regex: {
       total: 0,
-      lossless: 0,
-      widened: 0,
-      unsupported: 0,
+      emitted: 0,
     },
   };
 }

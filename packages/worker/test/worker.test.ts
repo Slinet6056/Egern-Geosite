@@ -799,7 +799,12 @@ describe("worker fetch routes", () => {
       }),
     );
     await bucket.putJson("snapshots/etag-fetch-v1/index/geosite.json", {
-      google: { name: "GOOGLE", sourceFile: "google", filters: [], modes: {} },
+      google: {
+        name: "GOOGLE",
+        sourceFile: "google",
+        filters: [],
+        path: "rules/google.yaml",
+      },
     });
 
     const ctx = new TestContext();
@@ -822,9 +827,7 @@ describe("worker fetch routes", () => {
     expect(body).toContain('"google.com"');
     expect(body).not.toContain("mail.google.com");
 
-    const cached = await bucket.get(
-      "artifacts/etag-fetch-v1/balanced/google.yaml",
-    );
+    const cached = await bucket.get("artifacts/etag-fetch-v1/google.yaml");
     expect(cached).not.toBeNull();
 
     await ctx.drain();
@@ -941,23 +944,57 @@ describe("worker fetch routes", () => {
       }),
     );
     await bucket.putJson("snapshots/etag-suffix-v1/index/geosite.json", {
-      google: { name: "GOOGLE", sourceFile: "google", filters: [], modes: {} },
+      google: {
+        name: "GOOGLE",
+        sourceFile: "google",
+        filters: [],
+        path: "rules/google.yaml",
+      },
     });
 
     const worker = createWorker();
     const response = await worker.fetch(
-      new Request("https://example.com/geosite/strict/google@cn.yaml"),
+      new Request("https://example.com/geosite/google@cn.yaml"),
       env,
       new TestContext(),
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("x-mode")).toBe("strict");
     expect(response.headers.get("x-filter")).toBe("cn");
     expect(response.headers.get("content-disposition")).toBe(
       'inline; filename="google@cn.yaml"',
     );
     expect(await response.text()).toContain('"google.com"');
+  });
+
+  test("redirects legacy mode routes to canonical geosite path", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    const worker = createWorker();
+
+    for (const mode of ["strict", "balanced", "full"] as const) {
+      const yamlResponse = await worker.fetch(
+        new Request(`https://example.com/geosite/${mode}/google@cn.yaml?x=1`),
+        env,
+        new TestContext(),
+      );
+
+      expect(yamlResponse.status).toBe(308);
+      expect(yamlResponse.headers.get("location")).toBe(
+        "https://example.com/geosite/google@cn.yaml?x=1",
+      );
+
+      const plainResponse = await worker.fetch(
+        new Request(`https://example.com/geosite/${mode}/google@cn?x=2`),
+        env,
+        new TestContext(),
+      );
+
+      expect(plainResponse.status).toBe(308);
+      expect(plainResponse.headers.get("location")).toBe(
+        "https://example.com/geosite/google@cn?x=2",
+      );
+    }
   });
 
   test("returns stale artifact and refreshes latest in background", async () => {
@@ -990,16 +1027,12 @@ describe("worker fetch routes", () => {
         name: "GOOGLE",
         sourceFile: "google",
         filters: [],
-        modes: {
-          strict: "rules/strict/google.yaml",
-          balanced: "rules/balanced/google.yaml",
-          full: "rules/full/google.yaml",
-        },
+        path: "rules/google.yaml",
       },
     });
 
     await bucket.put(
-      "artifacts/etag-stale-v1/balanced/google.yaml",
+      "artifacts/etag-stale-v1/google.yaml",
       'domain_suffix_set:\n  - "old.example"\n',
     );
 
@@ -1019,9 +1052,7 @@ describe("worker fetch routes", () => {
 
     await ctx.drain();
 
-    const refreshed = await bucket.get(
-      "artifacts/etag-stale-v2/balanced/google.yaml",
-    );
+    const refreshed = await bucket.get("artifacts/etag-stale-v2/google.yaml");
     expect(refreshed).not.toBeNull();
     expect(await refreshed!.text()).toContain('"google.com"');
   });
@@ -1056,15 +1087,11 @@ describe("worker fetch routes", () => {
         name: "GITHUB",
         sourceFile: "github",
         filters: [],
-        modes: {
-          strict: "rules/strict/github.yaml",
-          balanced: "rules/balanced/github.yaml",
-          full: "rules/full/github.yaml",
-        },
+        path: "rules/github.yaml",
       },
     });
     await bucket.put(
-      "artifacts/etag-del-v1/balanced/google.yaml",
+      "artifacts/etag-del-v1/google.yaml",
       'domain_suffix_set:\n  - "old-google.example"\n',
     );
 
@@ -1104,7 +1131,7 @@ describe("worker fetch routes", () => {
       }),
     );
     await bucket.put(
-      "artifacts/etag-noindex-v1/balanced/google.yaml",
+      "artifacts/etag-noindex-v1/google.yaml",
       'domain_suffix_set:\n  - "old-google.example"\n',
     );
 
@@ -1149,11 +1176,7 @@ describe("worker fetch routes", () => {
         name: "GOOGLE",
         sourceFile: "google",
         filters: [],
-        modes: {
-          strict: "rules/strict/google.yaml",
-          balanced: "rules/balanced/google.yaml",
-          full: "rules/full/google.yaml",
-        },
+        path: "rules/google.yaml",
       },
     });
 
@@ -1168,7 +1191,7 @@ describe("worker fetch routes", () => {
     expect(unknownFilter.status).toBe(200);
     expect(await unknownFilter.text()).toBe("");
     expect(
-      await bucket.get("artifacts/etag-filter-v1/balanced/google@us.yaml"),
+      await bucket.get("artifacts/etag-filter-v1/google@us.yaml"),
     ).toBeNull();
 
     const knownFilter = await worker.fetch(
@@ -1237,240 +1260,6 @@ describe("worker fetch routes", () => {
     );
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('"google.com"');
-  });
-
-  test("caches geosite-srs payload and serves from cache without extra upstream calls", async () => {
-    const bucket = new MemoryR2Bucket();
-    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
-    const payload = strToU8("srs-binary-payload");
-    let calls = 0;
-
-    const fetchImpl: typeof fetch = async (
-      _input: RequestInfo | URL,
-    ): Promise<Response> => {
-      calls += 1;
-      return new Response(toResponseBody(payload), {
-        status: 200,
-        headers: {
-          etag: '"srs-etag-v1"',
-          "content-type": "application/octet-stream",
-        },
-      });
-    };
-
-    const worker = createWorker({
-      now: () => Date.parse("2026-02-15T00:00:00.000Z"),
-      fetchImpl,
-    });
-
-    const first = await worker.fetch(
-      new Request("https://example.com/geosite-srs/apple.srs"),
-      env,
-      new TestContext(),
-    );
-    expect(first.status).toBe(200);
-    expect(first.headers.get("content-disposition")).toBe(
-      'attachment; filename="apple.srs"',
-    );
-    expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
-
-    const second = await worker.fetch(
-      new Request("https://example.com/geosite-srs/apple"),
-      env,
-      new TestContext(),
-    );
-    expect(second.status).toBe(200);
-    expect(new Uint8Array(await second.arrayBuffer())).toEqual(payload);
-    expect(calls).toBe(1);
-  });
-
-  test("returns stale geosite-srs cache when upstream refresh fails", async () => {
-    const bucket = new MemoryR2Bucket();
-    const env: WorkerEnv = {
-      GEOSITE_BUCKET: bucket,
-      SRS_CACHE_TTL_SECONDS: "1",
-    };
-    const payload = strToU8("srs-old");
-    let calls = 0;
-    let nowMs = Date.parse("2026-02-15T00:00:00.000Z");
-
-    const fetchImpl: typeof fetch = async (
-      _input: RequestInfo | URL,
-    ): Promise<Response> => {
-      calls += 1;
-      if (calls === 1) {
-        return new Response(toResponseBody(payload), {
-          status: 200,
-          headers: {
-            etag: '"srs-etag-v1"',
-            "content-type": "application/octet-stream",
-          },
-        });
-      }
-
-      return new Response("upstream error", {
-        status: 500,
-      });
-    };
-
-    const worker = createWorker({
-      now: () => nowMs,
-      fetchImpl,
-    });
-
-    const first = await worker.fetch(
-      new Request("https://example.com/geosite-srs/apple"),
-      env,
-      new TestContext(),
-    );
-    expect(first.status).toBe(200);
-    expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
-
-    nowMs += 2000;
-    const second = await worker.fetch(
-      new Request("https://example.com/geosite-srs/apple"),
-      env,
-      new TestContext(),
-    );
-    expect(second.status).toBe(200);
-    expect(new Uint8Array(await second.arrayBuffer())).toEqual(payload);
-    expect(second.headers.get("x-stale")).toBe("1");
-    expect(calls).toBe(2);
-  });
-
-  test("purges geosite-srs cache on upstream 404 after stale response", async () => {
-    const bucket = new MemoryR2Bucket();
-    const env: WorkerEnv = {
-      GEOSITE_BUCKET: bucket,
-      SRS_CACHE_TTL_SECONDS: "1",
-    };
-    const payload = strToU8("srs-old");
-    let calls = 0;
-    let nowMs = Date.parse("2026-02-15T00:00:00.000Z");
-
-    const fetchImpl: typeof fetch = async (): Promise<Response> => {
-      calls += 1;
-      if (calls === 1) {
-        return new Response(toResponseBody(payload), {
-          status: 200,
-          headers: {
-            etag: '"srs-etag-v1"',
-            "content-type": "application/octet-stream",
-          },
-        });
-      }
-      return new Response(null, { status: 404 });
-    };
-
-    const worker = createWorker({
-      now: () => nowMs,
-      fetchImpl,
-    });
-
-    const firstCtx = new TestContext();
-    const first = await worker.fetch(
-      new Request("https://example.com/geosite-srs/apple"),
-      env,
-      firstCtx,
-    );
-    expect(first.status).toBe(200);
-    expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
-
-    nowMs += 2000;
-    const staleCtx = new TestContext();
-    const second = await worker.fetch(
-      new Request("https://example.com/geosite-srs/apple"),
-      env,
-      staleCtx,
-    );
-    expect(second.status).toBe(200);
-    expect(second.headers.get("x-stale")).toBe("1");
-    await staleCtx.drain();
-
-    expect(
-      await bucket.get("remote-cache/geosite-srs/blob/geosite-apple.srs"),
-    ).toBeNull();
-    expect(
-      await bucket.get("remote-cache/geosite-srs/meta/geosite-apple.srs.json"),
-    ).toBeNull();
-
-    nowMs += 1000;
-    const third = await worker.fetch(
-      new Request("https://example.com/geosite-srs/apple"),
-      env,
-      new TestContext(),
-    );
-    expect(third.status).toBe(404);
-    expect(await third.text()).toBe("srs not found: apple");
-    expect(calls).toBe(3);
-  });
-
-  test("returns 404 when geosite-srs list does not exist upstream", async () => {
-    const bucket = new MemoryR2Bucket();
-    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
-    const fetchImpl: typeof fetch = async (): Promise<Response> => {
-      return new Response(null, { status: 404 });
-    };
-
-    const worker = createWorker({ fetchImpl });
-    const response = await worker.fetch(
-      new Request("https://example.com/geosite-srs/not-exists"),
-      env,
-      new TestContext(),
-    );
-    expect(response.status).toBe(404);
-    expect(await response.text()).toBe("srs not found: not-exists");
-  });
-
-  test("caches geosite-mrs payload and serves from cache without extra upstream calls", async () => {
-    const bucket = new MemoryR2Bucket();
-    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
-    const payload = strToU8("mrs-binary-payload");
-    let calls = 0;
-
-    const fetchImpl: typeof fetch = async (
-      input: RequestInfo | URL,
-    ): Promise<Response> => {
-      const url = typeof input === "string" ? input : input.toString();
-      expect(url).toContain("/adblock.mrs");
-      calls += 1;
-      return new Response(toResponseBody(payload), {
-        status: 200,
-        headers: {
-          etag: '"mrs-etag-v1"',
-          "content-type": "application/octet-stream",
-        },
-      });
-    };
-
-    const worker = createWorker({
-      now: () => Date.parse("2026-02-15T00:00:00.000Z"),
-      fetchImpl,
-    });
-
-    const first = await worker.fetch(
-      new Request("https://example.com/geosite-mrs/adblock.mrs"),
-      env,
-      new TestContext(),
-    );
-    expect(first.status).toBe(200);
-    expect(first.headers.get("content-disposition")).toBe(
-      'attachment; filename="adblock.mrs"',
-    );
-    expect(new Uint8Array(await first.arrayBuffer())).toEqual(payload);
-
-    const second = await worker.fetch(
-      new Request("https://example.com/geosite-mrs/adblock"),
-      env,
-      new TestContext(),
-    );
-    expect(second.status).toBe(200);
-    expect(new Uint8Array(await second.arrayBuffer())).toEqual(payload);
-    expect(calls).toBe(1);
-
-    expect(
-      await bucket.get("remote-cache/geosite-mrs/blob/adblock.mrs"),
-    ).not.toBeNull();
   });
 
   test("returns 400 for invalid URL encoding", async () => {

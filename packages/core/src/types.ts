@@ -31,12 +31,11 @@ export interface ResolvedList {
   entries: DomainRule[];
 }
 
-export type RegexMode = "strict" | "balanced" | "full";
-
 export type EgernRuleType =
   | "DOMAIN-SUFFIX"
   | "DOMAIN"
   | "DOMAIN-KEYWORD"
+  | "DOMAIN-REGEX"
   | "DOMAIN-WILDCARD";
 
 export interface EgernRule {
@@ -45,27 +44,14 @@ export interface EgernRule {
   source: SourceLocation;
 }
 
-export interface RegexIssue {
-  pattern: string;
-  source: SourceLocation;
-  reason: string;
-  mode: RegexMode;
-}
-
 export interface EmitReport {
   regex: {
     total: number;
-    lossless: number;
-    widened: number;
-    unsupported: number;
+    emitted: number;
   };
-  widened: RegexIssue[];
-  unsupported: RegexIssue[];
 }
 
 export interface EmitEgernOptions {
-  regexMode?: RegexMode;
-  onUnsupportedRegex?: "skip" | "error";
   dedupe?: boolean;
 }
 
@@ -74,12 +60,6 @@ export interface EmitEgernResult {
   text: string;
   rules: EgernRule[];
   report: EmitReport;
-}
-
-export interface RegexTranspileResult {
-  status: "lossless" | "widened" | "unsupported";
-  rules: Array<Pick<EgernRule, "type" | "value">>;
-  reason?: string;
 }
 
 export interface SourceCounts {
@@ -100,11 +80,10 @@ export interface ResolvedCounts {
   regexp: number;
 }
 
-export interface ModeStats {
+export interface OutputStats {
   rules: number;
   bytes: number;
   regex: EmitReport["regex"];
-  unsupported: RegexIssue[];
 }
 
 export interface ListStats {
@@ -114,12 +93,12 @@ export interface ListStats {
   filters: {
     attrs: Record<string, number>;
   };
-  modes: Record<RegexMode, ModeStats>;
+  output: OutputStats;
 }
 
 export interface GlobalStats {
   lists: number;
   source: SourceCounts;
   resolved: ResolvedCounts;
-  modes: Record<RegexMode, Omit<ModeStats, "unsupported">>;
+  output: OutputStats;
 }

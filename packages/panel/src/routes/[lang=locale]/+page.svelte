@@ -3,19 +3,12 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
-  import {
-    Check,
-    Copy,
-    Download,
-    ExternalLink,
-    Moon,
-    Sun,
-  } from "@lucide/svelte";
+  import { Check, Copy, ExternalLink, Moon, Sun } from "@lucide/svelte";
 
   import { buildRulesApiPath, buildRulesPublicPath } from "$lib/panel/api";
   import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
   import { t } from "$lib/panel/i18n";
-  import type { GeositeIndex, PanelLocale, PanelMode } from "$lib/panel/types";
+  import type { GeositeIndex, PanelLocale } from "$lib/panel/types";
   import { countRuleLines, normalizeEtag } from "$lib/panel/utils";
 
   import {
@@ -37,7 +30,6 @@
 
   import type { PageData } from "./$types";
 
-  const MODES: PanelMode[] = ["strict", "balanced", "full"];
   const NONE_FILTER = "__none__";
   const SITE_ORIGIN = "https://egern.slinet.moe";
   const THEME_STORAGE_KEY = "egern-panel-theme";
@@ -51,7 +43,6 @@
   let index: GeositeIndex;
   let names: string[];
   let selected: string | null;
-  let mode: PanelMode;
   let search: string;
   let selectedFilter: string;
   let manualFilter: string;
@@ -97,7 +88,6 @@
     index = next.index ?? {};
     names = next.names ?? [];
     selected = next.selected ?? null;
-    mode = (next.mode as PanelMode) ?? "balanced";
     search = "";
     selectedFilter = NONE_FILTER;
     manualFilter = "";
@@ -114,7 +104,7 @@
     isRulesLoading = false;
     isIndexHydrating = false;
     initError = next.initError ?? null;
-    lastQueryKey = selected ? `${selected}|${mode}|` : "";
+    lastQueryKey = selected ? `${selected}|` : "";
   }
 
   applyServerData(data);
@@ -153,29 +143,18 @@
 
   $: quickLinks = (() => {
     if (!selected) {
-      return [] as Array<{ mode: PanelMode; href: string }>;
-    }
-    return MODES.map((item) => ({
-      mode: item,
-      href: buildRulesPublicPath(item, selected as string, liveFilter),
-    }));
-  })();
-  $: moreLinks = (() => {
-    if (!selected) {
       return [] as Array<{ key: string; label: string; href: string }>;
     }
-
-    const normalized = selected.trim().toLowerCase();
     return [
       {
-        key: "singbox-srs",
-        label: tr("singboxSrs"),
-        href: `${SITE_ORIGIN}/geosite-srs/${encodeURIComponent(normalized)}`,
+        key: "yaml",
+        label: "yaml",
+        href: buildRulesPublicPath(selected as string, liveFilter),
       },
       {
-        key: "mihomo-mrs",
-        label: tr("mihomoMrs"),
-        href: `${SITE_ORIGIN}/geosite-mrs/${encodeURIComponent(normalized)}`,
+        key: "plain",
+        label: "plain",
+        href: buildRulesApiPath(selected as string, liveFilter),
       },
     ];
   })();
@@ -198,7 +177,7 @@
   }
 
   $: if (selected) {
-    const queryKey = `${selected}|${mode}|${debouncedFilter ?? ""}`;
+    const queryKey = `${selected}|${debouncedFilter ?? ""}`;
     if (queryKey !== lastQueryKey) {
       void loadRules(debouncedFilter);
     }
@@ -272,7 +251,7 @@
       return;
     }
 
-    const queryKey = `${selected}|${mode}|${filter ?? ""}`;
+    const queryKey = `${selected}|${filter ?? ""}`;
     if (!force && queryKey === lastQueryKey) {
       return;
     }
@@ -282,10 +261,10 @@
     isRulesLoading = true;
     previewText = tr("loading");
     resetMeta();
-    rawLink = buildRulesPublicPath(mode, selected, filter);
+    rawLink = buildRulesPublicPath(selected, filter);
 
     try {
-      const response = await fetch(buildRulesApiPath(mode, selected, filter), {
+      const response = await fetch(buildRulesApiPath(selected, filter), {
         headers: { accept: "application/yaml, text/plain;q=0.8, */*;q=0.1" },
       });
       const body = await response.text();
@@ -414,14 +393,6 @@
     lastQueryKey = "";
   }
 
-  function onModeChange(nextMode: PanelMode) {
-    if (nextMode === mode) {
-      return;
-    }
-    mode = nextMode;
-    previewText = tr("modeSwitchLoading", { mode: nextMode });
-  }
-
   function onFilterChange(value: string) {
     selectedFilter = value;
     previewText = tr("filterSwitchLoading");
@@ -506,8 +477,8 @@
   <meta
     name="description"
     content={locale === "zh"
-      ? "Egern Geosite 面板：按模式和标签生成可直接使用的规则集。"
-      : "Egern Geosite panel for generating ready-to-use rule sets by mode and filter."}
+      ? "Egern Geosite 面板：按数据集和标签生成可直接使用的规则集。"
+      : "Egern Geosite panel for generating ready-to-use rule sets by dataset and filter."}
   />
   <link rel="canonical" href={canonicalUrl} />
   <link rel="alternate" hreflang="zh-CN" href={`${SITE_ORIGIN}/zh`} />
@@ -666,20 +637,6 @@
               {selectedInfo?.name ?? selected ?? "-"}
             </h2>
           </div>
-
-          <div class="inline-flex overflow-hidden rounded-md border">
-            {#each MODES as item}
-              <Button
-                type="button"
-                variant={mode === item ? "default" : "ghost"}
-                size="sm"
-                class="rounded-none border-r last:border-r-0"
-                onclick={() => onModeChange(item)}
-              >
-                {item}
-              </Button>
-            {/each}
-          </div>
         </div>
 
         <div class="grid gap-4 lg:grid-cols-[1fr_17rem]">
@@ -731,7 +688,7 @@
         </div>
 
         <div
-          class="text-muted-foreground grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4"
+          class="text-muted-foreground grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3"
         >
           <div>
             <span>{tr("upstreamEtag")} </span>
@@ -740,10 +697,6 @@
           <div>
             <span>{tr("staleFallback")} </span>
             <span class="font-mono">{stale}</span>
-          </div>
-          <div>
-            <span>{tr("mode")} </span>
-            <span class="font-mono">{mode}</span>
           </div>
           <div>
             <span>{tr("rules")} </span>
@@ -817,57 +770,6 @@
                   <div
                     class="flex items-center justify-between border px-2 py-1"
                   >
-                    <span class="font-mono">{item.mode}</span>
-                    <div class="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="outline"
-                        class="h-6 w-6"
-                        aria-label={`${copiedLinkKey === `quick:${item.mode}` ? tr("quickCopied") : tr("quickCopy")} ${item.mode}`}
-                        onclick={() =>
-                          onCopyLink(`quick:${item.mode}`, item.href)}
-                      >
-                        {#if copiedLinkKey === `quick:${item.mode}`}
-                          <Check class="size-3.5" />
-                        {:else}
-                          <Copy class="size-3.5" />
-                        {/if}
-                      </Button>
-                      <Button
-                        href={item.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        size="icon-sm"
-                        variant="outline"
-                        class="h-6 w-6"
-                        aria-label={`${tr("quickOpen")} ${item.mode}`}
-                      >
-                        <ExternalLink class="size-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                {/each}
-              {/if}
-            </div>
-          </section>
-
-          <Separator />
-
-          <section>
-            <h4
-              class="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.14em]"
-            >
-              {tr("more")}
-            </h4>
-            <div class="space-y-1 text-xs">
-              {#if moreLinks.length === 0}
-                <p class="text-muted-foreground">-</p>
-              {:else}
-                {#each moreLinks as item}
-                  <div
-                    class="flex items-center justify-between border px-2 py-1"
-                  >
                     <span class="font-mono">{item.label}</span>
                     <div class="flex items-center gap-1">
                       <Button
@@ -875,11 +777,11 @@
                         size="icon-sm"
                         variant="outline"
                         class="h-6 w-6"
-                        aria-label={`${copiedLinkKey === `more:${item.key}` ? tr("quickCopied") : tr("quickCopy")} ${item.label}`}
+                        aria-label={`${copiedLinkKey === `quick:${item.key}` ? tr("quickCopied") : tr("quickCopy")} ${item.label}`}
                         onclick={() =>
-                          onCopyLink(`more:${item.key}`, item.href)}
+                          onCopyLink(`quick:${item.key}`, item.href)}
                       >
-                        {#if copiedLinkKey === `more:${item.key}`}
+                        {#if copiedLinkKey === `quick:${item.key}`}
                           <Check class="size-3.5" />
                         {:else}
                           <Copy class="size-3.5" />
@@ -892,9 +794,9 @@
                         size="icon-sm"
                         variant="outline"
                         class="h-6 w-6"
-                        aria-label={`${tr("quickDownload")} ${item.label}`}
+                        aria-label={`${tr("quickOpen")} ${item.label}`}
                       >
-                        <Download class="size-3.5" />
+                        <ExternalLink class="size-3.5" />
                       </Button>
                     </div>
                   </div>

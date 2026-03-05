@@ -5,13 +5,11 @@ Cloudflare Worker runtime for geosite/geoip API serving with built-in cron refre
 ## Endpoints
 
 - `GET /geosite`
-- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml` (default mode: `balanced`)
-- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml` where mode is `strict|balanced|full`
+- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml`
+- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml` (legacy compatibility path, returns 308 redirect)
 - `GET /geoip`
 - `GET /geoip/:country_code` or `GET /geoip/:country_code.yaml`
 - `GET /geoip/:country_code?no_resolve=true` (adds `no_resolve: true` at top of ruleset output)
-- `GET /geosite-srs/:name` or `GET /geosite-srs/:name.srs`
-- `GET /geosite-mrs/:name` or `GET /geosite-mrs/:name.mrs`
 
 ## Runtime Model
 
@@ -23,7 +21,7 @@ Cloudflare Worker runtime for geosite/geoip API serving with built-in cron refre
 - `fetch`:
   - Route `/geosite*` and `/geoip*` requests to API handlers.
   - API handlers read latest state from R2.
-  - Serve prebuilt artifact from `artifacts/{etag}/{mode}/{name[@filter]}.yaml` (`geosite`) and `artifacts/{etag}/geoip/{country}.yaml` (`geoip`) when available.
+  - Serve prebuilt artifact from `artifacts/{etag}/{name[@filter]}.yaml` (`geosite`) and `artifacts/{etag}/geoip/{country}.yaml` (`geoip`) when available.
   - On miss, compile on-demand from snapshot and cache artifact.
   - Unknown filters are served as empty output but are not persisted as artifacts.
   - If previous ETag artifact exists, return stale artifact immediately and refresh latest artifact in background (`waitUntil`).
@@ -37,7 +35,7 @@ Cloudflare Worker runtime for geosite/geoip API serving with built-in cron refre
 - `snapshots/{etag}/geoip/raw.dat`
 - `snapshots/{etag}/geoip/sources.json.gz`
 - `snapshots/{etag}/index/geoip.json`
-- `artifacts/{etag}/{mode}/{name[@filter]}.yaml`
+- `artifacts/{etag}/{name[@filter]}.yaml`
 - `artifacts/{etag}/geoip/{country}.yaml`
 
 Retention:

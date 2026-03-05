@@ -7,7 +7,7 @@ import { describe, expect, test } from "vitest";
 import { runCli } from "../src/index.js";
 
 describe("runCli build", () => {
-  test("generates all mode artifacts and stats", async () => {
+  test("generates rules artifact and stats", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "geosite-build-"));
     const dataDir = path.join(root, "data");
     const outDir = path.join(root, "out");
@@ -28,33 +28,23 @@ describe("runCli build", () => {
     ]);
     expect(code).toBe(0);
 
-    const balanced = await readFile(
-      path.join(outDir, "rules", "balanced", "demo.yaml"),
-      "utf8",
-    );
-    const strict = await readFile(
-      path.join(outDir, "rules", "strict", "demo.yaml"),
-      "utf8",
-    );
-    const full = await readFile(
-      path.join(outDir, "rules", "full", "demo.yaml"),
+    const rules = await readFile(
+      path.join(outDir, "rules", "demo.yaml"),
       "utf8",
     );
     const resolved = await readFile(
       path.join(outDir, "resolved", "demo.json"),
       "utf8",
     );
-    const meta = await readFile(path.join(outDir, "meta.json"), "utf8");
     const globalStats = await readFile(
       path.join(outDir, "stats", "global.json"),
       "utf8",
     );
 
-    expect(strict).toContain("domain_suffix_set:");
-    expect(balanced).toContain('"netflix.com"');
-    expect(full).toContain('"netflix.com"');
+    expect(rules).toContain("domain_suffix_set:");
+    expect(rules).toContain("domain_regex_set:");
+    expect(rules).toContain('"(^|\\\\.)netflix\\\\.com$"');
     expect(resolved).toContain('"type": "domain"');
-    expect(meta).toContain('"defaultMode": "balanced"');
     expect(globalStats).toContain('"lists": 1');
   });
 
@@ -95,10 +85,10 @@ describe("runCli build", () => {
     ]);
 
     expect(code).toBe(0);
-    const balanced = await readFile(
-      path.join(outDir, "rules", "balanced", "direct-list.yaml"),
+    const rules = await readFile(
+      path.join(outDir, "rules", "direct-list.yaml"),
       "utf8",
     );
-    expect(balanced).toContain('"example.com"');
+    expect(rules).toContain('"example.com"');
   });
 });

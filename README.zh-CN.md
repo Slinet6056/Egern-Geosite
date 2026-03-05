@@ -48,7 +48,7 @@ rules:
       policy: DIRECT
       update_interval: 86400
   - rule_set:
-      match: "https://egern.slinet.moe/geosite/strict/proxy-list.yaml"
+      match: "https://egern.slinet.moe/geosite/proxy-list.yaml"
       policy: Proxy
       update_interval: 86400
   - rule_set:
@@ -62,19 +62,13 @@ rules:
 ### API
 
 - `GET /geosite`
-- `GET /geosite/:name_with_filter` 或 `GET /geosite/:name_with_filter.yaml`（默认模式：`balanced`）
-- `GET /geosite/:mode/:name_with_filter` 或 `GET /geosite/:mode/:name_with_filter.yaml`
+- `GET /geosite/:name_with_filter` 或 `GET /geosite/:name_with_filter.yaml`
+- `GET /geosite/:mode/:name_with_filter` 或 `GET /geosite/:mode/:name_with_filter.yaml`（兼容旧路径，返回 308 跳转）
 - `GET /geoip`
 - `GET /geoip/:country_code` 或 `GET /geoip/:country_code.yaml`
 - `GET /geoip/:country_code?no_resolve=true` 或 `GET /geoip/:country_code.yaml?no_resolve=true`
-- `GET /geosite-srs/:name` 或 `GET /geosite-srs/:name.srs`
-- `GET /geosite-mrs/:name` 或 `GET /geosite-mrs/:name.mrs`
 
-### 模式说明
-
-- `strict`：仅接受无损 regex 转换
-- `balanced`：可控降级（默认）
-- `full`：最宽松转换（覆盖范围最大，误匹配风险也最高）
+当前 geosite 输出已无模式，且上游 `regexp` 规则会无损输出为 `domain_regex_set`。
 
 ## 维护者说明
 

@@ -48,7 +48,7 @@ rules:
       policy: DIRECT
       update_interval: 86400
   - rule_set:
-      match: "https://egern.slinet.moe/geosite/strict/proxy-list.yaml"
+      match: "https://egern.slinet.moe/geosite/proxy-list.yaml"
       policy: Proxy
       update_interval: 86400
   - rule_set:
@@ -62,19 +62,13 @@ rules:
 ### API
 
 - `GET /geosite`
-- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml` (default mode: `balanced`)
-- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml`
+- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml`
+- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml` (legacy compatibility path, returns 308 redirect)
 - `GET /geoip`
 - `GET /geoip/:country_code` or `GET /geoip/:country_code.yaml`
 - `GET /geoip/:country_code?no_resolve=true` or `GET /geoip/:country_code.yaml?no_resolve=true`
-- `GET /geosite-srs/:name` or `GET /geosite-srs/:name.srs`
-- `GET /geosite-mrs/:name` or `GET /geosite-mrs/:name.mrs`
 
-### Mode Guide
-
-- `strict`: only lossless regex conversion
-- `balanced`: controlled downgrade (default)
-- `full`: most permissive conversion (widest coverage, highest over-match risk)
+Geosite output is now mode-less and lossless for upstream `regexp` entries (emitted as `domain_regex_set`).
 
 ## For Maintainers
 

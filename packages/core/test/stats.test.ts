@@ -6,7 +6,7 @@ import {
   countResolvedEntries,
   countSourceEntries,
   emitEgernRuleset,
-  modeStatsFromEmit,
+  outputStatsFromEmit,
   parseListsFromText,
   resolveAllLists,
   type ListStats,
@@ -52,32 +52,25 @@ describe("stats helpers", () => {
     expect(attrs.cn).toBeGreaterThan(0);
   });
 
-  test("aggregates mode stats", () => {
+  test("aggregates output stats", () => {
     const parsed = parseListsFromText({
       demo: "domain:example.com\nregexp:(^|\\.)netflix\\.com$",
     });
     const resolved = resolveAllLists(parsed).DEMO!;
 
-    const strict = modeStatsFromEmit(
-      emitEgernRuleset(resolved, { regexMode: "strict" }),
-    );
-    const balanced = modeStatsFromEmit(
-      emitEgernRuleset(resolved, { regexMode: "balanced" }),
-    );
-    const full = modeStatsFromEmit(
-      emitEgernRuleset(resolved, { regexMode: "full" }),
-    );
+    const output = outputStatsFromEmit(emitEgernRuleset(resolved));
 
     const listStats: ListStats = {
       name: "DEMO",
       source: countSourceEntries(parsed.DEMO!),
       resolved: countResolvedEntries(resolved.entries),
       filters: { attrs: countFilterAttrs(resolved.entries) },
-      modes: { strict, balanced, full },
+      output,
     };
 
     const global = aggregateGlobalStats([listStats]);
     expect(global.lists).toBe(1);
-    expect(global.modes.balanced.rules).toBe(listStats.modes.balanced.rules);
+    expect(global.output.rules).toBe(listStats.output.rules);
+    expect(global.output.regex.total).toBe(listStats.output.regex.total);
   });
 });

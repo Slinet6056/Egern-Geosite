@@ -1,22 +1,18 @@
-import { EgernEmitError } from "./errors.js";
-import { transpileRegexToEgern } from "./regex.js";
 import type {
   DomainRule,
   EmitReport,
   EmitEgernOptions,
   EmitEgernResult,
-  RegexIssue,
-  RegexMode,
   ResolvedList,
   EgernRule,
   EgernRuleType,
 } from "./types.js";
 
-const DEFAULT_REGEX_MODE: RegexMode = "balanced";
 const EGERN_RULESET_ORDER = [
   "domain_set",
   "domain_suffix_set",
   "domain_keyword_set",
+  "domain_regex_set",
   "domain_wildcard_set",
 ] as const;
 
@@ -27,29 +23,20 @@ export function emitEgernRuleset(
   list: ResolvedList,
   options: EmitEgernOptions = {},
 ): EmitEgernResult {
-  const regexMode = options.regexMode ?? DEFAULT_REGEX_MODE;
-  const onUnsupportedRegex = options.onUnsupportedRegex ?? "skip";
   const dedupe = options.dedupe ?? true;
 
   const rules: EgernRule[] = [];
   const report = initReport();
 
   for (const entry of list.entries) {
-    if (entry.type === "regexp") {
+    const mapped = mapRuleType(entry);
+    if (mapped === "DOMAIN-REGEX") {
       report.regex.total += 1;
-      handleRegexRule(
-        entry,
-        list.name,
-        regexMode,
-        onUnsupportedRegex,
-        report,
-        rules,
-      );
-      continue;
+      report.regex.emitted += 1;
     }
 
     rules.push({
-      type: mapRuleType(entry),
+      type: mapped,
       value: entry.value,
       source: entry.source,
     });
@@ -71,6 +58,7 @@ function serializeEgernRuleset(rules: EgernRule[]): string[] {
     domain_set: [],
     domain_suffix_set: [],
     domain_keyword_set: [],
+    domain_regex_set: [],
     domain_wildcard_set: [],
   };
 
@@ -102,6 +90,8 @@ function mapEgernRulesetField(ruleType: EgernRuleType): EgernRulesetField {
       return "domain_suffix_set";
     case "DOMAIN-KEYWORD":
       return "domain_keyword_set";
+    case "DOMAIN-REGEX":
+      return "domain_regex_set";
     case "DOMAIN-WILDCARD":
       return "domain_wildcard_set";
     default:
@@ -118,73 +108,10 @@ function mapRuleType(rule: DomainRule): EgernRuleType {
     case "keyword":
       return "DOMAIN-KEYWORD";
     case "regexp":
-      return "DOMAIN-WILDCARD";
+      return "DOMAIN-REGEX";
     default:
       return "DOMAIN-WILDCARD";
   }
-}
-
-function handleRegexRule(
-  entry: DomainRule,
-  listName: string,
-  regexMode: RegexMode,
-  onUnsupportedRegex: "skip" | "error",
-  report: EmitReport,
-  rules: EgernRule[],
-): void {
-  const result = transpileRegexToEgern(entry.value, regexMode);
-
-  if (result.status === "unsupported") {
-    report.regex.unsupported += 1;
-    const issue = makeIssue(
-      entry,
-      regexMode,
-      result.reason ?? "Unsupported regex pattern.",
-    );
-    report.unsupported.push(issue);
-
-    if (onUnsupportedRegex === "error") {
-      throw new EgernEmitError(
-        `unsupported regex in ${listName} at line ${entry.source.line}: ${entry.value} (${issue.reason})`,
-      );
-    }
-
-    return;
-  }
-
-  if (result.status === "widened") {
-    report.regex.widened += 1;
-    report.widened.push(
-      makeIssue(
-        entry,
-        regexMode,
-        result.reason ?? "Regex widened during conversion.",
-      ),
-    );
-  } else {
-    report.regex.lossless += 1;
-  }
-
-  for (const generated of result.rules) {
-    rules.push({
-      type: generated.type,
-      value: generated.value,
-      source: entry.source,
-    });
-  }
-}
-
-function makeIssue(
-  entry: DomainRule,
-  mode: RegexMode,
-  reason: string,
-): RegexIssue {
-  return {
-    pattern: entry.value,
-    source: entry.source,
-    reason,
-    mode,
-  };
 }
 
 function dedupeRules(rules: EgernRule[]): EgernRule[] {
@@ -207,11 +134,7 @@ function initReport(): EmitReport {
   return {
     regex: {
       total: 0,
-      lossless: 0,
-      widened: 0,
-      unsupported: 0,
+      emitted: 0,
     },
-    widened: [],
-    unsupported: [],
   };
 }

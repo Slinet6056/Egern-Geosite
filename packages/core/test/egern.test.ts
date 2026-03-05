@@ -1,67 +1,16 @@
 import { describe, expect, test } from "vitest";
 
-import { EgernEmitError } from "../src/errors.js";
-import { parseListsFromText } from "../src/parser.js";
-import { transpileRegexToEgern } from "../src/regex.js";
-import { resolveOneList } from "../src/resolver.js";
 import { emitEgernRuleset } from "../src/egern.js";
-
-describe("transpileRegexToEgern", () => {
-  test("converts exact and suffix regex losslessly", () => {
-    expect(transpileRegexToEgern("^github\\.com$", "strict")).toEqual({
-      status: "lossless",
-      rules: [{ type: "DOMAIN", value: "github.com" }],
-    });
-
-    expect(transpileRegexToEgern("(^|\\.)netflix\\.com$", "strict")).toEqual({
-      status: "lossless",
-      rules: [{ type: "DOMAIN-SUFFIX", value: "netflix.com" }],
-    });
-  });
-
-  test("widens complex regex in balanced mode", () => {
-    expect(
-      transpileRegexToEgern(
-        "^cdn\\d-epicgames-\\d+\\.file\\.myqcloud\\.com$",
-        "balanced",
-      ),
-    ).toEqual({
-      status: "widened",
-      rules: [
-        {
-          type: "DOMAIN-WILDCARD",
-          value: "cdn*-epicgames-*.file.myqcloud.com",
-        },
-      ],
-      reason: "Regex converted to heuristic DOMAIN-WILDCARD pattern.",
-    });
-  });
-
-  test("forces conversion in full mode when balanced cannot convert", () => {
-    expect(
-      transpileRegexToEgern("^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", "balanced"),
-    ).toEqual({
-      status: "unsupported",
-      rules: [],
-      reason: "Unable to convert regexp into a valid Egern domain pattern.",
-    });
-
-    expect(
-      transpileRegexToEgern("^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", "full"),
-    ).toEqual({
-      status: "widened",
-      rules: [{ type: "DOMAIN-WILDCARD", value: "*" }],
-      reason: "Regex downgraded to match-all wildcard in full mode.",
-    });
-  });
-});
+import { parseListsFromText } from "../src/parser.js";
+import { resolveOneList } from "../src/resolver.js";
+import type { DomainRule } from "../src/types.js";
 
 describe("emitEgernRuleset", () => {
-  test("emits Egern ruleset yaml and tracks regex report", () => {
+  test("emits domain, suffix, keyword and regex sets losslessly", () => {
     const parsed = parseListsFromText({
       demo: [
         "domain:example.com",
-        "full:api.example.com",
+        "full:api.sample.net",
         "keyword:tracker",
         "regexp:(^|\\.)netflix\\.com$",
         "regexp:^cdn\\d-epicgames-\\d+\\.file\\.myqcloud\\.com$",
@@ -69,37 +18,73 @@ describe("emitEgernRuleset", () => {
     });
 
     const resolved = resolveOneList(parsed, "demo");
-    const output = emitEgernRuleset(resolved, { regexMode: "balanced" });
+    const output = emitEgernRuleset(resolved);
 
     expect(output.lines).toEqual([
+      "domain_set:",
+      '  - "api.sample.net"',
       "domain_suffix_set:",
       '  - "example.com"',
-      '  - "netflix.com"',
       "domain_keyword_set:",
       '  - "tracker"',
-      "domain_wildcard_set:",
-      '  - "cdn*-epicgames-*.file.myqcloud.com"',
+      "domain_regex_set:",
+      '  - "(^|\\\\.)netflix\\\\.com$"',
+      '  - "^cdn\\\\d-epicgames-\\\\d+\\\\.file\\\\.myqcloud\\\\.com$"',
     ]);
 
     expect(output.report.regex).toEqual({
       total: 2,
-      lossless: 1,
-      widened: 1,
-      unsupported: 0,
+      emitted: 2,
     });
   });
 
-  test("throws when unsupported regex is configured as error", () => {
-    const parsed = parseListsFromText({
-      demo: "regexp:^a(?=b)\\.example\\.com$",
+  test("dedupes duplicated regex rules by default", () => {
+    const output = emitEgernRuleset({
+      name: "DEMO",
+      entries: [makeRegexRule(1), makeRegexRule(2)],
     });
 
-    const resolved = resolveOneList(parsed, "demo");
-    expect(() =>
-      emitEgernRuleset(resolved, {
-        regexMode: "balanced",
-        onUnsupportedRegex: "error",
-      }),
-    ).toThrow(EgernEmitError);
+    expect(output.lines).toEqual([
+      "domain_regex_set:",
+      '  - "(^|\\\\.)netflix\\\\.com$"',
+    ]);
+    expect(output.report.regex).toEqual({
+      total: 2,
+      emitted: 2,
+    });
+  });
+
+  test("keeps duplicated regex rules when dedupe is disabled", () => {
+    const output = emitEgernRuleset(
+      {
+        name: "DEMO",
+        entries: [makeRegexRule(1), makeRegexRule(2)],
+      },
+      { dedupe: false },
+    );
+
+    expect(output.lines).toEqual([
+      "domain_regex_set:",
+      '  - "(^|\\\\.)netflix\\\\.com$"',
+      '  - "(^|\\\\.)netflix\\\\.com$"',
+    ]);
+    expect(output.report.regex).toEqual({
+      total: 2,
+      emitted: 2,
+    });
   });
 });
+
+function makeRegexRule(line: number): DomainRule {
+  return {
+    type: "regexp",
+    value: "(^|\\.)netflix\\.com$",
+    attrs: [],
+    affiliations: [],
+    plain: "regexp:(^|\\.)netflix\\.com$",
+    source: {
+      list: "demo",
+      line,
+    },
+  };
+}

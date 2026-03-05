@@ -3,10 +3,9 @@ import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
 import { t } from "$lib/panel/i18n";
 import { countRuleLines, normalizeEtag } from "$lib/panel/utils";
 
-import type { GeositeIndex, PanelLocale, PanelMode } from "$lib/panel/types";
+import type { GeositeIndex, PanelLocale } from "$lib/panel/types";
 import type { PageServerLoad } from "./$types";
 
-const DEFAULT_MODE: PanelMode = "balanced";
 const RULES_CACHE_LIMIT = 64;
 const INDEX_REVALIDATE_INTERVAL_MS = 20_000;
 
@@ -148,8 +147,8 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
       }
       index = initialIndex;
 
-      rawLink = buildRulesPublicPath(DEFAULT_MODE, selected, null);
-      const rulesKey = `${currentIndex.upstreamEtag}:${DEFAULT_MODE}:${selected}`;
+      rawLink = buildRulesPublicPath(selected, null);
+      const rulesKey = `${currentIndex.upstreamEtag}:${selected}`;
       const cachedRules = rulesCache.get(rulesKey);
 
       if (cachedRules) {
@@ -160,7 +159,7 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
         ruleLines = cachedRules.ruleLines;
       } else {
         const rulesResponse = await fetch(
-          `/geosite/${DEFAULT_MODE}/${encodeURIComponent(selected)}`,
+          `/geosite/${encodeURIComponent(selected)}`,
           {
             headers: {
               accept: "application/yaml, text/plain;q=0.8, */*;q=0.1",
@@ -202,7 +201,6 @@ export const load: PageServerLoad = async ({ params, fetch }) => {
     index,
     names,
     selected,
-    mode: DEFAULT_MODE,
     previewText,
     etag,
     stale,

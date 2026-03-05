@@ -10,11 +10,7 @@ Development/debug helper for generating geosite artifacts locally.
 
 - `<out>/meta.json`
 - `<out>/index/geosite.json`
-- `<out>/rules/strict/<list>.yaml`
-- `<out>/rules/balanced/<list>.yaml`
-- `<out>/rules/full/<list>.yaml`
+- `<out>/rules/<list>.yaml`
 - `<out>/resolved/<list>.json`
 - `<out>/stats/global.json`
 - `<out>/stats/lists/<list>.json`
-
-`balanced` is the default serving mode.

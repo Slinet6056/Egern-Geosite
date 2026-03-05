@@ -36,7 +36,7 @@ Recommended route priority:
 ## Serve Pipeline
 
 1. Read `state/latest.json`.
-2. Try `artifacts/{etag}/{mode}/{name[@filter]}.yaml` (`geosite`) or `artifacts/{etag}/geoip/{country}.yaml` (`geoip`).
+2. Try `artifacts/{etag}/{name[@filter]}.yaml` (`geosite`) or `artifacts/{etag}/geoip/{country}.yaml` (`geoip`).
 3. If hit: return immediately.
 4. If miss:
    - Optionally return stale artifact from previous ETag (non-filter path), then rebuild latest in background.
@@ -45,31 +45,25 @@ Recommended route priority:
 ## API Surface
 
 - `GET /geosite`
-- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml` (default mode: `balanced`)
-- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml`
+- `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml`
+- `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml` (legacy compatibility path, returns 308 redirect)
 - `GET /geoip`
 - `GET /geoip/:country_code` or `GET /geoip/:country_code.yaml`
 - `GET /geoip/:country_code?no_resolve=true` (adds `no_resolve: true` at top of ruleset output)
-- `GET /geosite-srs/:name` or `GET /geosite-srs/:name.srs`
-- `GET /geosite-mrs/:name` or `GET /geosite-mrs/:name.mrs`
 
 `name_with_filter` format:
 
 - `apple` => full converted list
 - `apple@cn` => only rules tagged with `@cn`
 
-## Modes
-
-- `strict`: only lossless regex conversion
-- `balanced`: controlled downgrade (default)
-- `full`: most permissive conversion
+Geosite output is now mode-less and emits upstream regexp entries as `domain_regex_set`.
 
 ## R2 Storage Layout
 
 - `state/latest.json`
 - `snapshots/{etag}/sources.json.gz`
 - `snapshots/{etag}/index/geosite.json`
-- `artifacts/{etag}/{mode}/{name[@filter]}.yaml`
+- `artifacts/{etag}/{name[@filter]}.yaml`
 - `snapshots/{etag}/geoip/raw.dat`
 - `snapshots/{etag}/geoip/sources.json.gz`
 - `snapshots/{etag}/index/geoip.json`

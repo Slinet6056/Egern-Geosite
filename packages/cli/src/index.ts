@@ -9,30 +9,25 @@ import {
   countResolvedEntries,
   countSourceEntries,
   emitEgernRuleset,
-  modeStatsFromEmit,
+  outputStatsFromEmit,
   parseListsFromText,
   resolveAllLists,
   type ListStats,
-  type RegexMode,
 } from "@egern-geosite/core";
 
 import { getStringFlag, parseCliArgs } from "./args.js";
 import { loadListsFromDirectory } from "./fs-loader.js";
 
-const ALL_MODES: RegexMode[] = ["strict", "balanced", "full"];
-
 interface BuildIndexEntry {
   name: string;
   sourceFile?: string;
   filters: string[];
-  modes: Record<RegexMode, string>;
+  path: string;
 }
 
 interface BuildMeta {
   generatedAt: string;
-  defaultMode: "balanced";
   lists: number;
-  modes: RegexMode[];
 }
 
 export async function runCli(argv: string[]): Promise<number> {
@@ -109,29 +104,15 @@ async function runBuild(
     const resolvedList = resolved[listName]!;
     const sourceEntries = parsed[listName] ?? [];
 
-    const emittedByMode = {
-      strict: emitEgernRuleset(resolvedList, { regexMode: "strict" }),
-      balanced: emitEgernRuleset(resolvedList, { regexMode: "balanced" }),
-      full: emitEgernRuleset(resolvedList, { regexMode: "full" }),
-    };
+    const emitted = emitEgernRuleset(resolvedList);
 
-    const modes = {
-      strict: modeStatsFromEmit(emittedByMode.strict),
-      balanced: modeStatsFromEmit(emittedByMode.balanced),
-      full: modeStatsFromEmit(emittedByMode.full),
-    };
-
-    for (const mode of ALL_MODES) {
-      const emitted = emittedByMode[mode];
-      const outputPath = path.join(
-        outDir,
-        "rules",
-        mode,
-        `${listName.toLowerCase()}.yaml`,
-      );
-      await mkdir(path.dirname(outputPath), { recursive: true });
-      await writeFile(outputPath, `${emitted.text}\n`, "utf8");
-    }
+    const outputPath = path.join(
+      outDir,
+      "rules",
+      `${listName.toLowerCase()}.yaml`,
+    );
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, `${emitted.text}\n`, "utf8");
 
     const resolvedPath = path.join(
       outDir,
@@ -151,7 +132,7 @@ async function runBuild(
       filters: {
         attrs: countFilterAttrs(resolvedList.entries),
       },
-      modes,
+      output: outputStatsFromEmit(emitted),
     };
 
     listStats.push(currentListStats);
@@ -176,20 +157,14 @@ async function runBuild(
       name: listName,
       ...(sourceFile ? { sourceFile } : {}),
       filters: Object.keys(currentListStats.filters.attrs).sort(),
-      modes: {
-        strict: `rules/strict/${listName.toLowerCase()}.yaml`,
-        balanced: `rules/balanced/${listName.toLowerCase()}.yaml`,
-        full: `rules/full/${listName.toLowerCase()}.yaml`,
-      },
+      path: `rules/${listName.toLowerCase()}.yaml`,
     };
   }
 
   const globalStats = aggregateGlobalStats(listStats);
   const meta: BuildMeta = {
     generatedAt: new Date().toISOString(),
-    defaultMode: "balanced",
     lists: listStats.length,
-    modes: ALL_MODES,
   };
 
   await writeFile(
@@ -208,10 +183,7 @@ async function runBuild(
     "utf8",
   );
 
-  console.log(
-    `generated lists=${listStats.length} modes=${ALL_MODES.join(",")} output=${outDir}`,
-  );
-  console.log(`default mode path: ${path.join(outDir, "rules", "balanced")}`);
+  console.log(`generated lists=${listStats.length} output=${outDir}`);
   return 0;
 }
 
@@ -237,9 +209,7 @@ function printHelp(): void {
 build output layout:
   <out>/meta.json
   <out>/index/geosite.json
-  <out>/rules/strict/<list>.yaml
-  <out>/rules/balanced/<list>.yaml
-  <out>/rules/full/<list>.yaml
+  <out>/rules/<list>.yaml
   <out>/resolved/<list>.json
   <out>/stats/global.json
   <out>/stats/lists/<list>.json`);
