@@ -5,8 +5,10 @@ SvelteKit SSR panel for Egern Geosite.
 ## Routes
 
 - `/:lang/` where `lang = zh | en`
+- `/:lang/geoip` for GeoIP dataset dashboard
 - Root `/` redirects to locale based on `Accept-Language`
 - `/geosite*` proxy endpoints for local development and SSR data fetching
+- `/geoip*` proxy endpoints for local development and SSR data fetching
 
 ## Scripts
 

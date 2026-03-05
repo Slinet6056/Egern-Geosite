@@ -27,8 +27,13 @@ const VALID_LIST_NAME = /^[a-z0-9!-]+$/;
 const VALID_ATTR_NAME = /^[a-z0-9!-]+$/;
 
 const snapshotCache = new Map<string, Promise<SnapshotPayload>>();
+const geoipSnapshotCache = new Map<string, Promise<GeoipSnapshotPayload>>();
 const resolvedCache = new Map<string, Promise<Record<string, ResolvedList>>>();
 const artifactBuildLocks = new Map<string, Promise<ArtifactBuildResult>>();
+const geoipArtifactBuildLocks = new Map<
+  string,
+  Promise<GeoipArtifactBuildResult>
+>();
 const remoteBinaryCacheLocks = new Map<
   string,
   Promise<ReadThroughRemoteBinaryResult>
@@ -87,17 +92,20 @@ interface WorkerDeps {
   fetchImpl?: typeof fetch;
 }
 
+interface SnapshotMeta {
+  sourceKey: string;
+  indexKey: string;
+  listCount: number;
+  generatedAt: string;
+}
+
 interface LatestState {
   upstream: {
     zipUrl: string;
     etag: string;
   };
-  snapshot: {
-    sourceKey: string;
-    indexKey: string;
-    listCount: number;
-    generatedAt: string;
-  };
+  snapshot: SnapshotMeta;
+  geoipSnapshot?: SnapshotMeta;
   previousEtag: string | null;
   checkedAt: string;
 }
@@ -110,6 +118,20 @@ interface SnapshotPayload {
   lists: Record<string, string>;
 }
 
+interface GeoipListPayload {
+  ipv4Cidrs: string[];
+  ipv6Cidrs: string[];
+  reverseMatch: boolean;
+}
+
+interface GeoipSnapshotPayload {
+  version: 1;
+  etag: string;
+  zipUrl: string;
+  generatedAt: string;
+  lists: Record<string, GeoipListPayload>;
+}
+
 interface GeositeIndexEntry {
   name: string;
   sourceFile: string;
@@ -118,6 +140,17 @@ interface GeositeIndexEntry {
 }
 
 type GeositeIndex = Record<string, GeositeIndexEntry>;
+
+interface GeoipIndexEntry {
+  name: string;
+  sourceFile: string;
+  ipv4Count: number;
+  ipv6Count: number;
+  defaultPath: string;
+  noResolvePath: string;
+}
+
+type GeoipIndex = Record<string, GeoipIndexEntry>;
 
 interface RefreshResult {
   updated: boolean;
@@ -131,6 +164,11 @@ interface ArtifactBuildResult {
   listFound: boolean;
   output: string;
   availableFilters: string[];
+}
+
+interface GeoipArtifactBuildResult {
+  listFound: boolean;
+  output: string;
 }
 
 interface RemoteBinaryCacheMeta {
@@ -280,7 +318,9 @@ export async function refreshGeositeRun(
     };
   }
 
-  const sources = extractSourcesFromZip(zipBytes);
+  const extracted = extractSourcesFromZip(zipBytes);
+  const sources = extracted.geositeSources;
+  const geoipSources = extracted.geoipSources;
   const listCount = Object.keys(sources).length;
   if (listCount === 0) {
     throw new Error("no geosite data files found in upstream zip");
@@ -292,6 +332,9 @@ export async function refreshGeositeRun(
   const generatedAt = new Date(now()).toISOString();
   const sourceKey = snapshotSourceKey(computedEtag);
   const indexKey = snapshotIndexKey(computedEtag);
+  const geoipListCount = Object.keys(geoipSources).length;
+  const geoipSourceKey = geoipSnapshotSourceKey(computedEtag);
+  const geoipIndexKey = geoipSnapshotIndexKey(computedEtag);
 
   const snapshotPayload: SnapshotPayload = {
     version: 1,
@@ -300,9 +343,20 @@ export async function refreshGeositeRun(
     generatedAt,
     lists: sources,
   };
+  const geoipSnapshotPayload: GeoipSnapshotPayload = {
+    version: 1,
+    etag: computedEtag,
+    zipUrl,
+    generatedAt,
+    lists: geoipSources,
+  };
 
   const compressedSnapshot = gzipSync(strToU8(JSON.stringify(snapshotPayload)));
+  const compressedGeoipSnapshot = gzipSync(
+    strToU8(JSON.stringify(geoipSnapshotPayload)),
+  );
   const index = buildIndexFromSources(sources);
+  const geoipIndex = buildGeoipIndexFromSources(geoipSources);
 
   await writeBinary(env.GEOSITE_BUCKET, sourceKey, compressedSnapshot, {
     contentType: "application/json",
@@ -310,17 +364,43 @@ export async function refreshGeositeRun(
   });
   await writeJson(env.GEOSITE_BUCKET, indexKey, index);
 
+  if (geoipListCount > 0) {
+    await writeBinary(
+      env.GEOSITE_BUCKET,
+      geoipSourceKey,
+      compressedGeoipSnapshot,
+      {
+        contentType: "application/json",
+        cacheControl: "public, max-age=31536000, immutable",
+      },
+    );
+    await writeJson(env.GEOSITE_BUCKET, geoipIndexKey, geoipIndex);
+  }
+
+  const snapshotMeta: SnapshotMeta = {
+    sourceKey,
+    indexKey,
+    listCount,
+    generatedAt,
+  };
+
+  const geoipSnapshotMeta: SnapshotMeta | undefined =
+    geoipListCount > 0
+      ? {
+          sourceKey: geoipSourceKey,
+          indexKey: geoipIndexKey,
+          listCount: geoipListCount,
+          generatedAt,
+        }
+      : undefined;
+
   const nextState: LatestState = {
     upstream: {
       zipUrl,
       etag: computedEtag,
     },
-    snapshot: {
-      sourceKey,
-      indexKey,
-      listCount,
-      generatedAt,
-    },
+    snapshot: snapshotMeta,
+    ...(geoipSnapshotMeta ? { geoipSnapshot: geoipSnapshotMeta } : {}),
     previousEtag: current?.upstream.etag ?? null,
     checkedAt,
   };
@@ -345,6 +425,7 @@ export async function refreshGeositeRun(
   await writeJson(env.GEOSITE_BUCKET, LATEST_STATE_KEY, nextState);
 
   snapshotCache.clear();
+  geoipSnapshotCache.clear();
   resolvedCache.clear();
 
   return {
@@ -371,6 +452,27 @@ async function handleFetch(
 
   if (path === "/geosite") {
     return handleGeositeIndex(request, env, ctx);
+  }
+
+  if (path === "/geoip") {
+    return handleGeoipIndex(request, env, ctx);
+  }
+
+  if (path.startsWith("/geoip/")) {
+    const suffix = path.slice("/geoip/".length);
+    const decoded = safeDecodeURIComponent(suffix);
+    if (decoded === null) {
+      return text(400, "invalid path encoding");
+    }
+
+    const noResolve = parseBooleanQueryFlag(url, "no_resolve");
+    return handleGeoipRules(
+      request,
+      stripOptionalSuffix(decoded, ".yaml"),
+      noResolve,
+      env,
+      ctx,
+    );
   }
 
   if (path === "/geosite-srs") {
@@ -401,44 +503,45 @@ async function handleFetch(
     return handleGeositeMrs(request, decoded, env, deps, ctx);
   }
 
-  if (!path.startsWith("/geosite/")) {
-    if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
+  if (path.startsWith("/geosite/")) {
+    const suffix = path.slice("/geosite/".length);
+    const segments = suffix.split("/").filter((item) => item.length > 0);
+    if (segments.length === 0) {
+      return text(404, "not found");
     }
-    return text(404, "not found");
+
+    let mode: RegexMode = "balanced";
+    let nameWithFilter: string;
+
+    if (segments.length >= 2 && isRegexMode(segments[0]!)) {
+      mode = segments[0]!;
+      const decoded = safeDecodeURIComponent(segments.slice(1).join("/"));
+      if (decoded === null) {
+        return text(400, "invalid path encoding");
+      }
+      nameWithFilter = decoded;
+    } else {
+      const decoded = safeDecodeURIComponent(segments.join("/"));
+      if (decoded === null) {
+        return text(400, "invalid path encoding");
+      }
+      nameWithFilter = decoded;
+    }
+
+    return handleGeositeRules(
+      request,
+      mode,
+      stripOptionalSuffix(nameWithFilter, ".yaml"),
+      env,
+      ctx,
+    );
   }
 
-  const suffix = path.slice("/geosite/".length);
-  const segments = suffix.split("/").filter((item) => item.length > 0);
-  if (segments.length === 0) {
-    return text(404, "not found");
+  if (env.ASSETS) {
+    return env.ASSETS.fetch(request);
   }
 
-  let mode: RegexMode = "balanced";
-  let nameWithFilter: string;
-
-  if (segments.length >= 2 && isRegexMode(segments[0]!)) {
-    mode = segments[0]!;
-    const decoded = safeDecodeURIComponent(segments.slice(1).join("/"));
-    if (decoded === null) {
-      return text(400, "invalid path encoding");
-    }
-    nameWithFilter = decoded;
-  } else {
-    const decoded = safeDecodeURIComponent(segments.join("/"));
-    if (decoded === null) {
-      return text(400, "invalid path encoding");
-    }
-    nameWithFilter = decoded;
-  }
-
-  return handleGeositeRules(
-    request,
-    mode,
-    stripOptionalSuffix(nameWithFilter, ".yaml"),
-    env,
-    ctx,
-  );
+  return text(404, "not found");
 }
 
 async function handleGeositeSrs(
@@ -601,6 +704,47 @@ async function handleGeositeIndex(
   return json(200, builtIndex, indexHeaders);
 }
 
+async function handleGeoipIndex(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContextLike,
+): Promise<Response> {
+  const latest = await ensureLatestState(env);
+  if (!latest || !latest.geoipSnapshot) {
+    return json(503, { ok: false, error: "geoip data not ready" });
+  }
+
+  const indexEtag = buildGeoipIndexEtag(latest.upstream.etag);
+  const indexHeaders = {
+    "cache-control":
+      "public, max-age=60, s-maxage=300, stale-while-revalidate=900",
+    etag: indexEtag,
+    "x-upstream-etag": latest.upstream.etag,
+    "x-generated-at": latest.geoipSnapshot.generatedAt,
+    "x-checked-at": latest.checkedAt,
+  };
+
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), indexEtag)) {
+    return notModified(indexHeaders);
+  }
+
+  const index = await readJson<GeoipIndex>(
+    env.GEOSITE_BUCKET,
+    latest.geoipSnapshot.indexKey,
+  );
+  if (index) {
+    return json(200, index, indexHeaders);
+  }
+
+  const snapshot = await loadGeoipSnapshotPayload(env, latest);
+  const builtIndex = buildGeoipIndexFromSources(snapshot.lists);
+  ctx.waitUntil(
+    writeJson(env.GEOSITE_BUCKET, latest.geoipSnapshot.indexKey, builtIndex),
+  );
+
+  return json(200, builtIndex, indexHeaders);
+}
+
 async function handleGeositeRules(
   request: Request,
   mode: RegexMode,
@@ -717,6 +861,114 @@ async function handleGeositeRules(
   return text(200, build.output, headers);
 }
 
+async function handleGeoipRules(
+  request: Request,
+  nameRaw: string,
+  noResolve: boolean,
+  env: WorkerEnv,
+  ctx: ExecutionContextLike,
+): Promise<Response> {
+  const name = nameRaw.trim().toLowerCase();
+  if (!isValidListName(name)) {
+    return text(400, "invalid name");
+  }
+
+  const latest = await ensureLatestState(env);
+  if (!latest || !latest.geoipSnapshot) {
+    return text(503, "geoip data not ready");
+  }
+
+  const latestKey = geoipArtifactKey(latest.upstream.etag, name);
+  const latestArtifact = await readText(env.GEOSITE_BUCKET, latestKey);
+  if (latestArtifact !== null) {
+    const responseEtag = buildGeoipRulesEtag(
+      latest.upstream.etag,
+      name,
+      noResolve,
+    );
+    const headers = geoipResponseHeaders(
+      latest.upstream.etag,
+      name,
+      false,
+      noResolve,
+    );
+    if (
+      matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)
+    ) {
+      return notModified(headers);
+    }
+    const output = noResolve
+      ? withNoResolveLine(latestArtifact)
+      : latestArtifact;
+    return text(200, output, headers);
+  }
+
+  const index = await readJson<GeoipIndex>(
+    env.GEOSITE_BUCKET,
+    latest.geoipSnapshot.indexKey,
+  );
+  if (index && !index[name]) {
+    return text(404, `list not found: ${name}`);
+  }
+
+  const compilePromise = ensureGeoipArtifactForLatest(env, latest, name);
+
+  if (latest.previousEtag && index && index[name]) {
+    const staleKey = geoipArtifactKey(latest.previousEtag, name);
+    const staleArtifact = await readText(env.GEOSITE_BUCKET, staleKey);
+    if (staleArtifact !== null) {
+      const responseEtag = buildGeoipRulesEtag(
+        latest.previousEtag,
+        name,
+        noResolve,
+      );
+      const headers = geoipResponseHeaders(
+        latest.previousEtag,
+        name,
+        true,
+        noResolve,
+      );
+      ctx.waitUntil(
+        compilePromise.then(() => undefined).catch(() => undefined),
+      );
+
+      if (
+        matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)
+      ) {
+        return notModified(headers);
+      }
+
+      const output = noResolve
+        ? withNoResolveLine(staleArtifact)
+        : staleArtifact;
+      return text(200, output, headers);
+    }
+  }
+
+  const build = await compilePromise;
+  if (!build.listFound) {
+    return text(404, `list not found: ${name}`);
+  }
+
+  const responseEtag = buildGeoipRulesEtag(
+    latest.upstream.etag,
+    name,
+    noResolve,
+  );
+  const headers = geoipResponseHeaders(
+    latest.upstream.etag,
+    name,
+    false,
+    noResolve,
+  );
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
+    return notModified(headers);
+  }
+
+  const output = noResolve ? withNoResolveLine(build.output) : build.output;
+  return text(200, output, headers);
+}
+
 function splitNameFilter(input: string): {
   name: string;
   filter: string | null;
@@ -748,6 +1000,10 @@ function buildRulesFileName(name: string, filter: string | null): string {
   return `${filter ? `${normalizedName}@${filter}` : normalizedName}.yaml`;
 }
 
+function buildGeoipRulesFileName(name: string): string {
+  return `${name.toLowerCase()}.yaml`;
+}
+
 function responseHeaders(
   etag: string,
   mode: RegexMode,
@@ -768,6 +1024,26 @@ function responseHeaders(
     "x-mode": mode,
     "x-list": name.toLowerCase(),
     ...(filter ? { "x-filter": filter } : {}),
+    ...(stale ? { "x-stale": "1" } : {}),
+  };
+}
+
+function geoipResponseHeaders(
+  etag: string,
+  name: string,
+  stale: boolean,
+  noResolve: boolean,
+): Record<string, string> {
+  return {
+    "content-type": "text/yaml; charset=utf-8",
+    "content-disposition": `inline; filename="${buildGeoipRulesFileName(name)}"`,
+    "cache-control": stale
+      ? "public, max-age=60, s-maxage=120, stale-while-revalidate=900"
+      : "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
+    etag: buildGeoipRulesEtag(etag, name, noResolve),
+    "x-upstream-etag": etag,
+    "x-list": name.toLowerCase(),
+    ...(noResolve ? { "x-no-resolve": "1" } : {}),
     ...(stale ? { "x-stale": "1" } : {}),
   };
 }
@@ -989,6 +1265,10 @@ function buildIndexEtag(upstreamEtag: string): string {
   return `"${upstreamEtag}-index"`;
 }
 
+function buildGeoipIndexEtag(upstreamEtag: string): string {
+  return `"${upstreamEtag}-geoip-index"`;
+}
+
 function buildRulesEtag(
   upstreamEtag: string,
   mode: RegexMode,
@@ -996,6 +1276,14 @@ function buildRulesEtag(
   filter: string | null,
 ): string {
   return `"${upstreamEtag}:${mode}:${name.toLowerCase()}${filter ? `@${filter}` : ""}"`;
+}
+
+function buildGeoipRulesEtag(
+  upstreamEtag: string,
+  name: string,
+  noResolve: boolean,
+): string {
+  return `"${upstreamEtag}:geoip:${name.toLowerCase()}:nr${noResolve ? "1" : "0"}"`;
 }
 
 function matchesIfNoneMatch(ifNoneMatch: string | null, etag: string): boolean {
@@ -1098,6 +1386,54 @@ async function ensureArtifactForLatest(
   return lock;
 }
 
+async function ensureGeoipArtifactForLatest(
+  env: WorkerEnv,
+  latest: LatestState,
+  name: string,
+): Promise<GeoipArtifactBuildResult> {
+  const lockKey = `geoip:${latest.upstream.etag}:${name}`;
+  const existingLock = geoipArtifactBuildLocks.get(lockKey);
+  if (existingLock) {
+    return existingLock;
+  }
+
+  const lock = (async () => {
+    const outputKey = geoipArtifactKey(latest.upstream.etag, name);
+    const existing = await readText(env.GEOSITE_BUCKET, outputKey);
+    if (existing !== null) {
+      return {
+        listFound: true,
+        output: existing,
+      };
+    }
+
+    const snapshot = await loadGeoipSnapshotPayload(env, latest);
+    const target = snapshot.lists[name];
+    if (!target) {
+      return {
+        listFound: false,
+        output: "",
+      };
+    }
+
+    const output = emitGeoipRuleset(target);
+    await writeText(env.GEOSITE_BUCKET, outputKey, output, {
+      contentType: "application/yaml; charset=utf-8",
+      cacheControl: "public, max-age=31536000, immutable",
+    });
+
+    return {
+      listFound: true,
+      output,
+    };
+  })().finally(() => {
+    geoipArtifactBuildLocks.delete(lockKey);
+  });
+
+  geoipArtifactBuildLocks.set(lockKey, lock);
+  return lock;
+}
+
 async function loadResolvedLists(
   env: WorkerEnv,
   latest: LatestState,
@@ -1147,6 +1483,40 @@ async function loadSnapshotPayload(
   pruneMap(snapshotCache, SNAPSHOT_CACHE_LIMIT);
   return pending.catch((error) => {
     snapshotCache.delete(cacheKey);
+    throw error;
+  });
+}
+
+async function loadGeoipSnapshotPayload(
+  env: WorkerEnv,
+  latest: LatestState,
+): Promise<GeoipSnapshotPayload> {
+  const meta = latest.geoipSnapshot;
+  if (!meta) {
+    throw new Error("geoip snapshot not available");
+  }
+
+  const cacheKey = meta.sourceKey;
+  const cached = geoipSnapshotCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const pending = (async () => {
+    const object = await env.GEOSITE_BUCKET.get(meta.sourceKey);
+    if (!object) {
+      throw new Error(`snapshot not found: ${meta.sourceKey}`);
+    }
+
+    const compressed = new Uint8Array(await object.arrayBuffer());
+    const payloadText = strFromU8(gunzipSync(compressed));
+    return JSON.parse(payloadText) as GeoipSnapshotPayload;
+  })();
+
+  geoipSnapshotCache.set(cacheKey, pending);
+  pruneMap(geoipSnapshotCache, SNAPSHOT_CACHE_LIMIT);
+  return pending.catch((error) => {
+    geoipSnapshotCache.delete(cacheKey);
     throw error;
   });
 }
@@ -1215,6 +1585,55 @@ function buildIndexFromSources(sources: Record<string, string>): GeositeIndex {
   return index;
 }
 
+function buildGeoipIndexFromSources(
+  sources: Record<string, GeoipListPayload>,
+): GeoipIndex {
+  const names = Object.keys(sources).sort();
+  const index: GeoipIndex = {};
+
+  for (const listName of names) {
+    const current = sources[listName];
+    if (!current) {
+      continue;
+    }
+
+    index[listName] = {
+      name: listName.toUpperCase(),
+      sourceFile: listName,
+      ipv4Count: current.ipv4Cidrs.length,
+      ipv6Count: current.ipv6Cidrs.length,
+      defaultPath: `geoip/${listName}.yaml`,
+      noResolvePath: `geoip/${listName}.yaml?no_resolve=true`,
+    };
+  }
+
+  return index;
+}
+
+function emitGeoipRuleset(list: GeoipListPayload): string {
+  const lines: string[] = [];
+
+  if (list.ipv4Cidrs.length > 0) {
+    lines.push("ip_cidr_set:");
+    for (const cidr of list.ipv4Cidrs) {
+      lines.push(`  - ${JSON.stringify(cidr)}`);
+    }
+  }
+
+  if (list.ipv6Cidrs.length > 0) {
+    lines.push("ip_cidr6_set:");
+    for (const cidr of list.ipv6Cidrs) {
+      lines.push(`  - ${JSON.stringify(cidr)}`);
+    }
+  }
+
+  return lines.length > 0 ? `${lines.join("\n")}\n` : "";
+}
+
+function withNoResolveLine(content: string): string {
+  return `no_resolve: true\n${content}`;
+}
+
 function collectFilters(entries: DomainRule[]): string[] {
   const attrs = new Set<string>();
 
@@ -1227,13 +1646,27 @@ function collectFilters(entries: DomainRule[]): string[] {
   return Array.from(attrs).sort();
 }
 
-function extractSourcesFromZip(zipData: Uint8Array): Record<string, string> {
+function extractSourcesFromZip(zipData: Uint8Array): {
+  geositeSources: Record<string, string>;
+  geoipSources: Record<string, GeoipListPayload>;
+} {
   const files = unzipSync(zipData);
-  const fromDat = extractSourcesFromGeositeDat(files);
-  if (fromDat === null) {
+  const geositeSources = extractSourcesFromGeositeDat(files);
+  if (geositeSources === null) {
     throw new Error("no geosite.dat found in upstream zip");
   }
-  return fromDat;
+
+  let geoipSources: Record<string, GeoipListPayload> = {};
+  try {
+    geoipSources = extractSourcesFromGeoipDat(files) ?? {};
+  } catch {
+    geoipSources = {};
+  }
+
+  return {
+    geositeSources,
+    geoipSources,
+  };
 }
 
 interface GeositeDatDomain {
@@ -1245,6 +1678,17 @@ interface GeositeDatDomain {
 interface GeositeDatEntry {
   countryCode: string;
   domains: GeositeDatDomain[];
+}
+
+interface GeoipDatCidr {
+  ip: Uint8Array;
+  prefix: number;
+}
+
+interface GeoipDatEntry {
+  countryCode: string;
+  cidrs: GeoipDatCidr[];
+  reverseMatch: boolean;
 }
 
 interface ProtoReader {
@@ -1436,6 +1880,207 @@ function toGeositeSourceLine(domain: GeositeDatDomain): string | null {
   return `${prefix} ${attrs.map((attr) => `@${attr}`).join(" ")}`;
 }
 
+function extractSourcesFromGeoipDat(
+  files: Record<string, Uint8Array>,
+): Record<string, GeoipListPayload> | null {
+  for (const [filePath, content] of Object.entries(files)) {
+    if (!/\/geoip\.dat$/i.test(filePath)) {
+      continue;
+    }
+
+    const parsed = parseGeoipDat(content);
+    if (parsed.length === 0) {
+      throw new Error("geoip.dat is empty");
+    }
+
+    const grouped = new Map<
+      string,
+      {
+        ipv4: Set<string>;
+        ipv6: Set<string>;
+        reverseMatch: boolean;
+      }
+    >();
+
+    for (const entry of parsed) {
+      const listName = entry.countryCode.trim().toLowerCase();
+      if (!VALID_LIST_NAME.test(listName)) {
+        continue;
+      }
+
+      const current = grouped.get(listName) ?? {
+        ipv4: new Set<string>(),
+        ipv6: new Set<string>(),
+        reverseMatch: false,
+      };
+
+      for (const cidr of entry.cidrs) {
+        const normalized = toGeoipCidrString(cidr);
+        if (!normalized) {
+          continue;
+        }
+
+        if (normalized.family === "ipv4") {
+          current.ipv4.add(normalized.cidr);
+        } else {
+          current.ipv6.add(normalized.cidr);
+        }
+      }
+
+      current.reverseMatch = current.reverseMatch || entry.reverseMatch;
+      grouped.set(listName, current);
+    }
+
+    if (grouped.size === 0) {
+      throw new Error("geoip.dat contains no valid list names");
+    }
+
+    const sources: Record<string, GeoipListPayload> = {};
+    for (const [listName, item] of grouped.entries()) {
+      sources[listName] = {
+        ipv4Cidrs: Array.from(item.ipv4).sort(),
+        ipv6Cidrs: Array.from(item.ipv6).sort(),
+        reverseMatch: item.reverseMatch,
+      };
+    }
+
+    return sources;
+  }
+
+  return null;
+}
+
+function parseGeoipDat(input: Uint8Array): GeoipDatEntry[] {
+  const reader: ProtoReader = { input, offset: 0 };
+  const entries: GeoipDatEntry[] = [];
+
+  while (!protoEof(reader)) {
+    const tag = readVarint(reader);
+    const field = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    if (field === 1 && wireType === 2) {
+      entries.push(parseGeoipDatEntry(readLengthDelimited(reader)));
+      continue;
+    }
+
+    skipField(reader, wireType);
+  }
+
+  return entries;
+}
+
+function parseGeoipDatEntry(input: Uint8Array): GeoipDatEntry {
+  const reader: ProtoReader = { input, offset: 0 };
+  let countryCode = "";
+  const cidrs: GeoipDatCidr[] = [];
+  let reverseMatch = false;
+
+  while (!protoEof(reader)) {
+    const tag = readVarint(reader);
+    const field = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    if (field === 1 && wireType === 2) {
+      countryCode = strFromU8(readLengthDelimited(reader));
+      continue;
+    }
+
+    if (field === 2 && wireType === 2) {
+      cidrs.push(parseGeoipDatCidr(readLengthDelimited(reader)));
+      continue;
+    }
+
+    if (field === 3 && wireType === 0) {
+      reverseMatch = readVarint(reader) !== 0;
+      continue;
+    }
+
+    skipField(reader, wireType);
+  }
+
+  return {
+    countryCode,
+    cidrs,
+    reverseMatch,
+  };
+}
+
+function parseGeoipDatCidr(input: Uint8Array): GeoipDatCidr {
+  const reader: ProtoReader = { input, offset: 0 };
+  let ip = new Uint8Array();
+  let prefix = 0;
+
+  while (!protoEof(reader)) {
+    const tag = readVarint(reader);
+    const field = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    if (field === 1 && wireType === 2) {
+      ip = Uint8Array.from(readLengthDelimited(reader));
+      continue;
+    }
+
+    if (field === 2 && wireType === 0) {
+      prefix = readVarint(reader);
+      continue;
+    }
+
+    skipField(reader, wireType);
+  }
+
+  return {
+    ip,
+    prefix,
+  };
+}
+
+function toGeoipCidrString(
+  cidr: GeoipDatCidr,
+): { family: "ipv4" | "ipv6"; cidr: string } | null {
+  if (cidr.ip.length === 4) {
+    if (!isValidCidrPrefix(cidr.prefix, 32)) {
+      return null;
+    }
+
+    return {
+      family: "ipv4",
+      cidr: `${toIpv4String(cidr.ip)}/${cidr.prefix}`,
+    };
+  }
+
+  if (cidr.ip.length === 16) {
+    if (!isValidCidrPrefix(cidr.prefix, 128)) {
+      return null;
+    }
+
+    return {
+      family: "ipv6",
+      cidr: `${toIpv6String(cidr.ip)}/${cidr.prefix}`,
+    };
+  }
+
+  return null;
+}
+
+function isValidCidrPrefix(prefix: number, max: number): boolean {
+  return Number.isInteger(prefix) && prefix >= 0 && prefix <= max;
+}
+
+function toIpv4String(ip: Uint8Array): string {
+  return Array.from(ip).join(".");
+}
+
+function toIpv6String(ip: Uint8Array): string {
+  const parts: string[] = [];
+  for (let index = 0; index < 16; index += 2) {
+    const value = ((ip[index] ?? 0) << 8) | (ip[index + 1] ?? 0);
+    parts.push(value.toString(16));
+  }
+
+  return parts.join(":");
+}
+
 function protoEof(reader: ProtoReader): boolean {
   return reader.offset >= reader.input.length;
 }
@@ -1544,12 +2189,24 @@ function artifactKey(
   return `artifacts/${etag}/${mode}/${artifactName(name, filter)}.yaml`;
 }
 
+function geoipArtifactKey(etag: string, name: string): string {
+  return `artifacts/${etag}/geoip/${name.toLowerCase()}.yaml`;
+}
+
 function snapshotSourceKey(etag: string): string {
   return `snapshots/${etag}/sources.json.gz`;
 }
 
+function geoipSnapshotSourceKey(etag: string): string {
+  return `snapshots/${etag}/geoip/sources.json.gz`;
+}
+
 function snapshotIndexKey(etag: string): string {
   return `snapshots/${etag}/index/geosite.json`;
+}
+
+function geoipSnapshotIndexKey(etag: string): string {
+  return `snapshots/${etag}/index/geoip.json`;
 }
 
 function remoteBlobKey(namespace: string, cacheKey: string): string {
@@ -1669,6 +2326,16 @@ function isValidListName(input: string): boolean {
 
 function isValidAttr(input: string): boolean {
   return VALID_ATTR_NAME.test(input);
+}
+
+function parseBooleanQueryFlag(url: URL, key: string): boolean {
+  const raw = url.searchParams.get(key);
+  if (!raw) {
+    return false;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
 }
 
 function safeDecodeURIComponent(value: string): string | null {

@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Egern Geosite</h1>
-  <p>Automatically converts <code>Loyalsoldier/v2ray-rules-dat</code> datasets into ready-to-use Egern rule sets.</p>
+  <p>Automatically converts <code>Loyalsoldier/v2ray-rules-dat</code> datasets (geosite + geoip) into ready-to-use Egern rule sets.</p>
   <p>
     English | <a href="./README.zh-CN.md">中文</a>
   </p>
@@ -24,6 +24,8 @@ If you want to use rule URLs directly, the format is:
 
 - Recommended rules path: `https://egern.slinet.moe/geosite/:name_with_filter.yaml`
 - Compatibility path (also valid): `https://egern.slinet.moe/geosite/:name_with_filter`
+- GeoIP rules path: `https://egern.slinet.moe/geoip/:country_code.yaml`
+- GeoIP rules path with DNS skip: `https://egern.slinet.moe/geoip/:country_code.yaml?no_resolve=true`
 
 `name_with_filter` has two forms:
 
@@ -31,6 +33,11 @@ If you want to use rule URLs directly, the format is:
   Returns the full rules for the `apple` dataset.
 - With filter: `apple@cn`
   Returns only rules tagged with `@cn`.
+
+`country_code` example:
+
+- `cn`
+  Returns CIDR rules converted from the `CN` GeoIP dataset.
 
 Egern example:
 
@@ -44,6 +51,10 @@ rules:
       match: "https://egern.slinet.moe/geosite/strict/proxy-list.yaml"
       policy: Proxy
       update_interval: 86400
+  - rule_set:
+      match: "https://egern.slinet.moe/geoip/cn.yaml?no_resolve=true"
+      policy: DIRECT
+      update_interval: 86400
 ```
 
 ## Advanced Usage
@@ -53,6 +64,9 @@ rules:
 - `GET /geosite`
 - `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml` (default mode: `balanced`)
 - `GET /geosite/:mode/:name_with_filter` or `GET /geosite/:mode/:name_with_filter.yaml`
+- `GET /geoip`
+- `GET /geoip/:country_code` or `GET /geoip/:country_code.yaml`
+- `GET /geoip/:country_code?no_resolve=true` or `GET /geoip/:country_code.yaml?no_resolve=true`
 - `GET /geosite-srs/:name` or `GET /geosite-srs/:name.srs`
 - `GET /geosite-mrs/:name` or `GET /geosite-mrs/:name.mrs`
 

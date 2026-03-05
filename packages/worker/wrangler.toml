@@ -6,7 +6,8 @@ compatibility_date = "2026-02-15"
 workers_dev = true
 compatibility_flags = ["nodejs_compat"]
 routes = [
-  { pattern = "egern.slinet.moe/geosite*", zone_name = "slinet.moe" }
+  { pattern = "egern.slinet.moe/geosite*", zone_name = "slinet.moe" },
+  { pattern = "egern.slinet.moe/geoip*", zone_name = "slinet.moe" }
 ]
 
 [observability]

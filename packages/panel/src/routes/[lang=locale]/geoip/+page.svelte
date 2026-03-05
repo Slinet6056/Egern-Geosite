@@ -3,19 +3,11 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
-  import {
-    Check,
-    Copy,
-    Download,
-    ExternalLink,
-    Moon,
-    Sun,
-  } from "@lucide/svelte";
+  import { Check, Copy, ExternalLink, Moon, Sun } from "@lucide/svelte";
 
-  import { buildRulesApiPath, buildRulesPublicPath } from "$lib/panel/api";
-  import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
+  import { buildGeoipApiPath, buildGeoipPublicPath } from "$lib/panel/api";
   import { t } from "$lib/panel/i18n";
-  import type { GeositeIndex, PanelLocale, PanelMode } from "$lib/panel/types";
+  import type { GeoipIndex, PanelLocale } from "$lib/panel/types";
   import { countRuleLines, normalizeEtag } from "$lib/panel/utils";
 
   import {
@@ -35,41 +27,50 @@
   import { Separator } from "$lib/components/ui/separator";
   import { Skeleton } from "$lib/components/ui/skeleton";
 
-  import type { PageData } from "./$types";
-
-  const MODES: PanelMode[] = ["strict", "balanced", "full"];
-  const NONE_FILTER = "__none__";
   const SITE_ORIGIN = "https://egern.slinet.moe";
   const THEME_STORAGE_KEY = "egern-panel-theme";
   const THEME_MEDIA_QUERY = "(prefers-color-scheme: dark)";
+  const GEOIP_MODES = [
+    { key: "resolve", noResolve: false, labelKey: "geoipModeResolve" },
+    { key: "no_resolve", noResolve: true, labelKey: "geoipModeNoResolve" },
+  ] as const;
 
   type ThemePreference = "system" | "light" | "dark";
 
-  export let data: PageData;
+  interface GeoipPageData {
+    locale: PanelLocale;
+    index: GeoipIndex;
+    names: string[];
+    selected: string | null;
+    noResolve: boolean;
+    previewText: string;
+    etag: string;
+    stale: string;
+    ruleLines: string;
+    rawLink: string;
+    initError: string | null;
+  }
+
+  export let data: GeoipPageData;
 
   let locale: PanelLocale;
-  let index: GeositeIndex;
+  let index: GeoipIndex;
   let names: string[];
   let selected: string | null;
-  let mode: PanelMode;
+  let noResolve: boolean;
   let search: string;
-  let selectedFilter: string;
-  let manualFilter: string;
-  let debouncedManualFilter: string;
   let listCount: string;
   let previewText: string;
   let etag: string;
   let stale: string;
   let ruleLines: string;
   let rawLink: string;
+  let initError: string | null;
   let isIndexLoading: boolean;
   let isRulesLoading: boolean;
-  let initError: string | null;
-  let isIndexHydrating: boolean;
 
   let loadToken = 0;
   let lastQueryKey = "";
-  let manualDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let copiedLinkKey: string | null = null;
   let copiedQuickLinkTimer: ReturnType<typeof setTimeout> | null = null;
   let themePreference: ThemePreference = "system";
@@ -82,6 +83,7 @@
     key,
     vars = {},
   ) => t(locale, key, vars);
+
   $: tr = (key, vars = {}) => t(locale, key, vars);
   $: themeModeLabel =
     themePreference === "dark"
@@ -91,37 +93,32 @@
         : tr("themeSystem");
   $: themeToggleAriaLabel = tr("themeToggleAria", { mode: themeModeLabel });
 
-  function applyServerData(next: PageData) {
+  function applyServerData(next: GeoipPageData) {
     const nextLocale = next.locale as PanelLocale;
     locale = nextLocale;
     index = next.index ?? {};
     names = next.names ?? [];
     selected = next.selected ?? null;
-    mode = (next.mode as PanelMode) ?? "balanced";
+    noResolve = next.noResolve ?? false;
     search = "";
-    selectedFilter = NONE_FILTER;
-    manualFilter = "";
-    debouncedManualFilter = "";
-    listCount = next.initError
-      ? t(nextLocale, "error")
-      : t(nextLocale, "listsCount", { count: names.length });
-    previewText = next.previewText ?? t(nextLocale, "selectDataset");
+    previewText = next.previewText ?? t(nextLocale, "geoipSelectDataset");
     etag = next.etag ?? "-";
     stale = next.stale ?? "-";
     ruleLines = next.ruleLines ?? "-";
     rawLink = next.rawLink ?? "#";
     isIndexLoading = false;
     isRulesLoading = false;
-    isIndexHydrating = false;
     initError = next.initError ?? null;
-    lastQueryKey = selected ? `${selected}|${mode}|` : "";
+    listCount = next.initError
+      ? t(nextLocale, "error")
+      : t(nextLocale, "listsCount", { count: names.length });
+    lastQueryKey = selected ? `${selected}|${noResolve ? 1 : 0}` : "";
   }
 
   applyServerData(data);
   $: applyServerData(data);
 
   $: selectedInfo = selected ? index[selected] : undefined;
-  $: availableFilters = selectedInfo?.filters ?? [];
   $: filteredNames = (() => {
     const query = search.trim().toLowerCase();
     if (!query) {
@@ -129,78 +126,32 @@
     }
     return names.filter((name) => name.includes(query));
   })();
-  $: renderLimit =
-    browser && hasFullIndex ? filteredNames.length : SSR_INITIAL_LIST_LIMIT;
-  $: displayNames = filteredNames.slice(0, renderLimit);
-  $: hasFullIndex =
-    names.length > 0 && Object.keys(index).length >= names.length;
-
-  $: liveFilter = (() => {
-    const manual = manualFilter.trim().toLowerCase();
-    if (manual) {
-      return manual;
-    }
-    return selectedFilter === NONE_FILTER ? null : selectedFilter;
-  })();
-
-  $: debouncedFilter = (() => {
-    const manual = debouncedManualFilter.trim().toLowerCase();
-    if (manual) {
-      return manual;
-    }
-    return selectedFilter === NONE_FILTER ? null : selectedFilter;
-  })();
-
   $: quickLinks = (() => {
     if (!selected) {
-      return [] as Array<{ mode: PanelMode; href: string }>;
-    }
-    return MODES.map((item) => ({
-      mode: item,
-      href: buildRulesPublicPath(item, selected as string, liveFilter),
-    }));
-  })();
-  $: moreLinks = (() => {
-    if (!selected) {
-      return [] as Array<{ key: string; label: string; href: string }>;
+      return [] as Array<{ mode: string; href: string }>;
     }
 
-    const normalized = selected.trim().toLowerCase();
-    return [
-      {
-        key: "singbox-srs",
-        label: tr("singboxSrs"),
-        href: `${SITE_ORIGIN}/geosite-srs/${encodeURIComponent(normalized)}`,
-      },
-      {
-        key: "mihomo-mrs",
-        label: tr("mihomoMrs"),
-        href: `${SITE_ORIGIN}/geosite-mrs/${encodeURIComponent(normalized)}`,
-      },
-    ];
+    const selectedName = selected;
+
+    return GEOIP_MODES.map((item) => ({
+      mode: item.key,
+      href: buildGeoipPublicPath(selectedName, item.noResolve),
+    }));
   })();
+  $: modeLabel = noResolve ? tr("geoipModeNoResolve") : tr("geoipModeResolve");
+  $: canonicalPath = locale === "en" ? "/en/geoip" : "/zh/geoip";
+  $: canonicalUrl = `${SITE_ORIGIN}${canonicalPath}`;
 
   $: if (initError) {
     listCount = tr("error");
   } else {
     listCount = tr("listsCount", { count: names.length });
   }
-  $: canonicalPath = locale === "en" ? "/en" : "/zh";
-  $: canonicalUrl = `${SITE_ORIGIN}${canonicalPath}`;
-
-  $: if (browser) {
-    if (manualDebounceTimer) {
-      clearTimeout(manualDebounceTimer);
-    }
-    manualDebounceTimer = setTimeout(() => {
-      debouncedManualFilter = manualFilter;
-    }, 280);
-  }
 
   $: if (selected) {
-    const queryKey = `${selected}|${mode}|${debouncedFilter ?? ""}`;
+    const queryKey = `${selected}|${noResolve ? 1 : 0}`;
     if (queryKey !== lastQueryKey) {
-      void loadRules(debouncedFilter);
+      void loadRules();
     }
   } else {
     rawLink = "#";
@@ -216,6 +167,7 @@
     if (preference === "system") {
       return window.matchMedia(THEME_MEDIA_QUERY).matches ? "dark" : "light";
     }
+
     return preference;
   }
 
@@ -264,25 +216,25 @@
     setThemePreference("system");
   }
 
-  async function loadRules(filter: string | null, force = false) {
+  async function loadRules(force = false) {
     if (!selected) {
       return;
     }
 
-    const queryKey = `${selected}|${mode}|${filter ?? ""}`;
+    const queryKey = `${selected}|${noResolve ? 1 : 0}`;
     if (!force && queryKey === lastQueryKey) {
       return;
     }
-    lastQueryKey = queryKey;
 
+    lastQueryKey = queryKey;
     const token = ++loadToken;
     isRulesLoading = true;
     previewText = tr("loading");
     resetMeta();
-    rawLink = buildRulesPublicPath(mode, selected, filter);
+    rawLink = buildGeoipPublicPath(selected, noResolve);
 
     try {
-      const response = await fetch(buildRulesApiPath(mode, selected, filter), {
+      const response = await fetch(buildGeoipApiPath(selected, noResolve), {
         headers: { accept: "application/yaml, text/plain;q=0.8, */*;q=0.1" },
       });
       const body = await response.text();
@@ -307,6 +259,7 @@
       if (token !== loadToken) {
         return;
       }
+
       const message = error instanceof Error ? error.message : String(error);
       previewText = tr("requestFailed", { message });
       resetMeta();
@@ -324,7 +277,7 @@
     try {
       let response: Response | null = null;
       for (let attempt = 0; attempt < 15; attempt += 1) {
-        response = await fetch("/geosite", {
+        response = await fetch("/geoip", {
           headers: { accept: "application/json" },
         });
         if (response.ok) {
@@ -340,62 +293,35 @@
           current: attempt + 1,
           total: 15,
         });
+
         await new Promise((resolve) => setTimeout(resolve, 1200));
       }
 
       if (!response || !response.ok) {
-        throw new Error("geosite data not ready");
+        throw new Error("geoip data not ready");
       }
 
-      index = (await response.json()) as GeositeIndex;
+      index = (await response.json()) as GeoipIndex;
       names = Object.keys(index).sort();
 
       if (names.length === 0) {
-        previewText = tr("indexEmpty");
+        previewText = tr("geoipIndexEmpty");
         selected = null;
         listCount = tr("listsCount", { count: 0 });
         return;
       }
 
       selected = names[0] ?? null;
-      selectedFilter = NONE_FILTER;
-      manualFilter = "";
-      debouncedManualFilter = "";
       previewText = tr("switchedDatasetLoading", { name: selected });
       lastQueryKey = "";
-      await loadRules(null, true);
+      await loadRules(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       initError = message;
       listCount = tr("error");
-      previewText = tr("failedLoad", { message });
+      previewText = tr("geoipFailedLoad", { message });
     } finally {
       isIndexLoading = false;
-    }
-  }
-
-  async function hydrateFullIndexIfNeeded() {
-    if (isIndexHydrating || hasFullIndex || names.length === 0 || initError) {
-      return;
-    }
-
-    isIndexHydrating = true;
-    try {
-      const response = await fetch("/geosite", {
-        headers: { accept: "application/json" },
-      });
-      if (!response.ok) {
-        return;
-      }
-
-      const fullIndex = (await response.json()) as GeositeIndex;
-      if (Object.keys(fullIndex).length > Object.keys(index).length) {
-        index = fullIndex;
-      }
-    } catch {
-      // Keep current partial index when hydration fetch fails.
-    } finally {
-      isIndexHydrating = false;
     }
   }
 
@@ -403,30 +329,22 @@
     if (name === selected) {
       return;
     }
+
     selected = name;
-    selectedFilter = NONE_FILTER;
-    manualFilter = "";
-    debouncedManualFilter = "";
     previewText = tr("switchedDatasetLoading", { name });
     lastQueryKey = "";
   }
 
-  function onModeChange(nextMode: PanelMode) {
-    if (nextMode === mode) {
+  function onNoResolveChange(nextNoResolve: boolean) {
+    if (nextNoResolve === noResolve) {
       return;
     }
-    mode = nextMode;
-    previewText = tr("modeSwitchLoading", { mode: nextMode });
-  }
 
-  function onFilterChange(value: string) {
-    selectedFilter = value;
-    previewText = tr("filterSwitchLoading");
-  }
-
-  function onManualFilterInput(value: string) {
-    manualFilter = value;
-    previewText = tr("filterInputLoading");
+    noResolve = nextNoResolve;
+    previewText = tr("geoipModeSwitchLoading", {
+      mode: nextNoResolve ? tr("geoipModeNoResolve") : tr("geoipModeResolve"),
+    });
+    lastQueryKey = "";
   }
 
   function toClipboardUrl(href: string): string {
@@ -449,6 +367,7 @@
       if (copiedQuickLinkTimer) {
         clearTimeout(copiedQuickLinkTimer);
       }
+
       copiedQuickLinkTimer = setTimeout(() => {
         copiedLinkKey = null;
       }, 1200);
@@ -477,39 +396,34 @@
     }
 
     applyTheme(themePreference);
-
     mediaQuery.addEventListener("change", onMediaChange);
 
     if (names.length === 0 && !initError) {
       void initIndex();
-    } else {
-      void hydrateFullIndexIfNeeded();
     }
 
     return () => {
-      if (manualDebounceTimer) {
-        clearTimeout(manualDebounceTimer);
-      }
       if (copiedQuickLinkTimer) {
         clearTimeout(copiedQuickLinkTimer);
       }
+
       mediaQuery.removeEventListener("change", onMediaChange);
     };
   });
 </script>
 
 <svelte:head>
-  <title>Egern Geosite Panel</title>
+  <title>Egern GeoIP Panel</title>
   <meta
     name="description"
     content={locale === "zh"
-      ? "Egern Geosite 面板：按模式和标签生成可直接使用的规则集。"
-      : "Egern Geosite panel for generating ready-to-use rule sets by mode and filter."}
+      ? "Egern GeoIP 面板：切换 no_resolve 并生成可直接使用的 IP 规则集。"
+      : "Egern GeoIP panel for generating ready-to-use IP rule sets with no_resolve toggle."}
   />
   <link rel="canonical" href={canonicalUrl} />
-  <link rel="alternate" hreflang="zh-CN" href={`${SITE_ORIGIN}/zh`} />
-  <link rel="alternate" hreflang="en" href={`${SITE_ORIGIN}/en`} />
-  <link rel="alternate" hreflang="x-default" href={`${SITE_ORIGIN}/en`} />
+  <link rel="alternate" hreflang="zh-CN" href={`${SITE_ORIGIN}/zh/geoip`} />
+  <link rel="alternate" hreflang="en" href={`${SITE_ORIGIN}/en/geoip`} />
+  <link rel="alternate" hreflang="x-default" href={`${SITE_ORIGIN}/en/geoip`} />
 </svelte:head>
 
 <main
@@ -522,30 +436,32 @@
       >
         <div class="space-y-1">
           <p class="text-primary text-xs font-semibold tracking-[0.2em]">
-            EGERN GEOSITE
+            EGERN GEOIP
           </p>
           <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">
-            {tr("appTitle")}
+            {tr("geoipAppTitle")}
           </h1>
-          <p class="text-muted-foreground text-sm">{tr("appSubTitle")}</p>
+          <p class="text-muted-foreground text-sm">{tr("geoipAppSubTitle")}</p>
         </div>
+
         <div class="flex items-center gap-2">
           <div class="inline-flex overflow-hidden rounded-md border">
             <a
               class={`px-3 py-1.5 text-sm font-medium transition-colors ${locale === "zh" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
-              href="/zh"
+              href="/zh/geoip"
               data-sveltekit-preload-data="hover"
             >
               ZH
             </a>
             <a
               class={`border-l px-3 py-1.5 text-sm font-medium transition-colors ${locale === "en" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
-              href="/en"
+              href="/en/geoip"
               data-sveltekit-preload-data="hover"
             >
               EN
             </a>
           </div>
+
           <Button
             type="button"
             size="sm"
@@ -561,22 +477,24 @@
             {/if}
             <span class="hidden sm:inline">{themeModeLabel}</span>
           </Button>
+
           <div class="inline-flex overflow-hidden rounded-md border">
             <a
-              class="bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium"
+              class="px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent"
               href={`/${locale}`}
               data-sveltekit-preload-data="hover"
             >
               {tr("pageGeosite")}
             </a>
             <a
-              class="border-l px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent"
+              class="border-l bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium"
               href={`/${locale}/geoip`}
               data-sveltekit-preload-data="hover"
             >
               {tr("pageGeoip")}
             </a>
           </div>
+
           <a
             class="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-accent"
             href="https://github.com/Slinet6056/Egern-Geosite"
@@ -599,14 +517,16 @@
           >
           <Badge variant="secondary">{listCount}</Badge>
         </div>
+
         <Input
           type="search"
           value={search}
           oninput={(event) =>
             (search = (event.currentTarget as HTMLInputElement).value)}
-          placeholder={tr("searchPlaceholder")}
+          placeholder={tr("geoipSearchPlaceholder")}
         />
       </CardHeader>
+
       <CardContent class="min-h-0 flex-1 pb-4">
         <div
           class="max-h-[38dvh] space-y-1 overflow-auto pr-2 lg:h-full lg:max-h-none"
@@ -622,10 +542,10 @@
               {tr("noMatch")}
             </p>
           {:else}
-            {#each displayNames as name (name)}
+            {#each filteredNames as name (name)}
               <button
                 type="button"
-                on:click={() => onSelectDataset(name)}
+                onclick={() => onSelectDataset(name)}
                 class={`hover:border-border flex w-full items-center justify-between border px-3 py-2 text-left text-sm transition-colors ${
                   selected === name
                     ? "border-primary text-primary bg-accent"
@@ -633,16 +553,12 @@
                 }`}
               >
                 <span class="font-mono">{name}</span>
-                <span class="text-muted-foreground font-mono text-xs">
-                  @{index[name] ? (index[name]?.filters?.length ?? 0) : "-"}
-                </span>
+                <span class="text-muted-foreground font-mono text-xs"
+                  >{index[name]?.ipv4Count ?? 0}/{index[name]?.ipv6Count ??
+                    0}</span
+                >
               </button>
             {/each}
-            {#if browser && !hasFullIndex}
-              <p class="text-muted-foreground px-2 py-3 text-xs">
-                {tr("indexHydrating")}
-              </p>
-            {/if}
           {/if}
         </div>
       </CardContent>
@@ -665,65 +581,17 @@
           </div>
 
           <div class="inline-flex overflow-hidden rounded-md border">
-            {#each MODES as item}
+            {#each GEOIP_MODES as item}
               <Button
                 type="button"
-                variant={mode === item ? "default" : "ghost"}
+                variant={noResolve === item.noResolve ? "default" : "ghost"}
                 size="sm"
                 class="rounded-none border-r last:border-r-0"
-                onclick={() => onModeChange(item)}
+                onclick={() => onNoResolveChange(item.noResolve)}
               >
-                {item}
+                {tr(item.labelKey)}
               </Button>
             {/each}
-          </div>
-        </div>
-
-        <div class="grid gap-4 lg:grid-cols-[1fr_17rem]">
-          <div class="grid gap-3 md:grid-cols-2">
-            <label class="space-y-1">
-              <span class="text-muted-foreground block text-xs font-semibold"
-                >{tr("filterTag")}</span
-              >
-              <select
-                class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-                value={selectedFilter}
-                on:change={(event) =>
-                  onFilterChange(
-                    (event.currentTarget as HTMLSelectElement).value,
-                  )}
-              >
-                <option value={NONE_FILTER}>{tr("noneOption")}</option>
-                {#each availableFilters as item}
-                  <option value={item}>{item}</option>
-                {/each}
-              </select>
-            </label>
-
-            <label class="space-y-1">
-              <span class="text-muted-foreground block text-xs font-semibold"
-                >{tr("manualTag")}</span
-              >
-              <Input
-                class="font-mono"
-                placeholder={tr("manualTagPlaceholder")}
-                value={manualFilter}
-                oninput={(event) =>
-                  onManualFilterInput(
-                    (event.currentTarget as HTMLInputElement).value,
-                  )}
-              />
-            </label>
-          </div>
-
-          <div class="flex items-end">
-            <Button
-              class="w-full"
-              onclick={() => loadRules(liveFilter, true)}
-              disabled={!selected || isRulesLoading}
-            >
-              {tr("loadRules")}
-            </Button>
           </div>
         </div>
 
@@ -740,7 +608,7 @@
           </div>
           <div>
             <span>{tr("mode")} </span>
-            <span class="font-mono">{mode}</span>
+            <span class="font-mono">{modeLabel}</span>
           </div>
           <div>
             <span>{tr("rules")} </span>
@@ -792,8 +660,12 @@
                 <span class="font-mono">{selectedInfo?.sourceFile ?? "-"}</span>
               </p>
               <p>
-                <span>{tr("filterCount")} </span>
-                <span class="font-mono">{availableFilters.length}</span>
+                <span>{tr("geoipIpv4Count")} </span>
+                <span class="font-mono">{selectedInfo?.ipv4Count ?? 0}</span>
+              </p>
+              <p>
+                <span>{tr("geoipIpv6Count")} </span>
+                <span class="font-mono">{selectedInfo?.ipv6Count ?? 0}</span>
               </p>
             </div>
           </section>
@@ -815,15 +687,16 @@
                     class="flex items-center justify-between border px-2 py-1"
                   >
                     <span class="font-mono">{item.mode}</span>
+
                     <div class="flex items-center gap-1">
                       <Button
                         type="button"
                         size="icon-sm"
                         variant="outline"
                         class="h-6 w-6"
-                        aria-label={`${copiedLinkKey === `quick:${item.mode}` ? tr("quickCopied") : tr("quickCopy")} ${item.mode}`}
                         onclick={() =>
                           onCopyLink(`quick:${item.mode}`, item.href)}
+                        aria-label={`${copiedLinkKey === `quick:${item.mode}` ? tr("quickCopied") : tr("quickCopy")} ${item.mode}`}
                       >
                         {#if copiedLinkKey === `quick:${item.mode}`}
                           <Check class="size-3.5" />
@@ -841,57 +714,6 @@
                         aria-label={`${tr("quickOpen")} ${item.mode}`}
                       >
                         <ExternalLink class="size-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                {/each}
-              {/if}
-            </div>
-          </section>
-
-          <Separator />
-
-          <section>
-            <h4
-              class="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.14em]"
-            >
-              {tr("more")}
-            </h4>
-            <div class="space-y-1 text-xs">
-              {#if moreLinks.length === 0}
-                <p class="text-muted-foreground">-</p>
-              {:else}
-                {#each moreLinks as item}
-                  <div
-                    class="flex items-center justify-between border px-2 py-1"
-                  >
-                    <span class="font-mono">{item.label}</span>
-                    <div class="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="outline"
-                        class="h-6 w-6"
-                        aria-label={`${copiedLinkKey === `more:${item.key}` ? tr("quickCopied") : tr("quickCopy")} ${item.label}`}
-                        onclick={() =>
-                          onCopyLink(`more:${item.key}`, item.href)}
-                      >
-                        {#if copiedLinkKey === `more:${item.key}`}
-                          <Check class="size-3.5" />
-                        {:else}
-                          <Copy class="size-3.5" />
-                        {/if}
-                      </Button>
-                      <Button
-                        href={item.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        size="icon-sm"
-                        variant="outline"
-                        class="h-6 w-6"
-                        aria-label={`${tr("quickDownload")} ${item.label}`}
-                      >
-                        <Download class="size-3.5" />
                       </Button>
                     </div>
                   </div>

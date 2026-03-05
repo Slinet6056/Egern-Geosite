@@ -104,6 +104,17 @@ interface TestGeositeEntry {
   domains: TestGeositeDomain[];
 }
 
+interface TestGeoipCidr {
+  ip: Uint8Array;
+  prefix: number;
+}
+
+interface TestGeoipEntry {
+  countryCode: string;
+  cidrs: TestGeoipCidr[];
+  reverseMatch?: boolean;
+}
+
 const TEST_DOMAIN_TYPE_TO_PROTO: Record<TestGeositeDomainType, number> = {
   keyword: 0,
   regexp: 1,
@@ -134,6 +145,54 @@ function makeGeositeDatPayload(entries: TestGeositeEntry[]): Uint8Array {
     pushBytesField(output, 1, Uint8Array.from(site));
   }
   return Uint8Array.from(output);
+}
+
+function makeGeoipDatPayload(entries: TestGeoipEntry[]): Uint8Array {
+  const output: number[] = [];
+
+  for (const entry of entries) {
+    const geoip: number[] = [];
+    pushStringField(geoip, 1, entry.countryCode);
+
+    for (const cidr of entry.cidrs) {
+      const item: number[] = [];
+      pushBytesField(item, 1, cidr.ip);
+      pushVarintField(item, 2, cidr.prefix);
+      pushBytesField(geoip, 2, Uint8Array.from(item));
+    }
+
+    if (entry.reverseMatch) {
+      pushVarintField(geoip, 3, 1);
+    }
+
+    pushBytesField(output, 1, Uint8Array.from(geoip));
+  }
+
+  return Uint8Array.from(output);
+}
+
+function makeGeoipSnapshotPayload(
+  etag: string,
+  lists: Record<
+    string,
+    {
+      ipv4Cidrs: string[];
+      ipv6Cidrs: string[];
+      reverseMatch: boolean;
+    }
+  >,
+): Uint8Array {
+  return gzipSync(
+    strToU8(
+      JSON.stringify({
+        version: 1,
+        etag,
+        zipUrl: "https://example.com/master.zip",
+        generatedAt: "2026-02-15T00:00:00.000Z",
+        lists,
+      }),
+    ),
+  );
 }
 
 function pushFieldKey(target: number[], field: number, wireType: number): void {
@@ -174,6 +233,24 @@ function pushVarint(target: number[], value: number): void {
   target.push(remaining);
 }
 
+function ipv4Bytes(a: number, b: number, c: number, d: number): Uint8Array {
+  return Uint8Array.from([a, b, c, d]);
+}
+
+function ipv6Bytes(hextets: number[]): Uint8Array {
+  if (hextets.length !== 8) {
+    throw new Error("ipv6 hextets must contain exactly 8 values");
+  }
+
+  const bytes: number[] = [];
+  for (const part of hextets) {
+    bytes.push((part >> 8) & 0xff);
+    bytes.push(part & 0xff);
+  }
+
+  return Uint8Array.from(bytes);
+}
+
 async function readSnapshotLists(
   bucket: MemoryR2Bucket,
   key: string,
@@ -188,6 +265,41 @@ async function readSnapshotLists(
   ) as {
     lists: Record<string, string>;
   };
+  return payload.lists;
+}
+
+async function readGeoipSnapshotLists(
+  bucket: MemoryR2Bucket,
+  key: string,
+): Promise<
+  Record<
+    string,
+    {
+      ipv4Cidrs: string[];
+      ipv6Cidrs: string[];
+      reverseMatch: boolean;
+    }
+  >
+> {
+  const raw = await bucket.get(key);
+  if (!raw) {
+    throw new Error(`missing geoip snapshot source: ${key}`);
+  }
+
+  const compressed = new Uint8Array(await raw.arrayBuffer());
+  const payload = JSON.parse(
+    new TextDecoder().decode(gunzipSync(compressed)),
+  ) as {
+    lists: Record<
+      string,
+      {
+        ipv4Cidrs: string[];
+        ipv6Cidrs: string[];
+        reverseMatch: boolean;
+      }
+    >;
+  };
+
   return payload.lists;
 }
 
@@ -254,6 +366,84 @@ describe("refreshGeositeRun", () => {
     expect(Object.keys(lists).sort()).toEqual(["github", "google"]);
     expect(lists.google).toContain("domain:google.com @cn");
     expect(lists.google).toContain("keyword:googlevideo");
+  });
+
+  test("parses geoip.dat and stores geoip snapshot when present", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+
+    const geositeDat = makeGeositeDatPayload([
+      {
+        name: "GOOGLE",
+        domains: [{ type: "domain", value: "google.com" }],
+      },
+    ]);
+
+    const geoipDat = makeGeoipDatPayload([
+      {
+        countryCode: "CN",
+        cidrs: [
+          { ip: ipv4Bytes(1, 1, 1, 0), prefix: 24 },
+          {
+            ip: ipv6Bytes([0x2001, 0x0db8, 0, 0, 0, 0, 0, 0]),
+            prefix: 32,
+          },
+        ],
+      },
+    ]);
+
+    const zipBytes = zipSync({
+      "v2ray-rules-dat-release/geosite.dat": geositeDat,
+      "v2ray-rules-dat-release/geoip.dat": geoipDat,
+    });
+
+    const fetchImpl: typeof fetch = async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "HEAD") {
+        return new Response(null, {
+          status: 200,
+          headers: {
+            etag: '"etag-refresh-with-geoip-v1"',
+          },
+        });
+      }
+
+      return new Response(toResponseBody(zipBytes), {
+        status: 200,
+        headers: {
+          etag: '"etag-refresh-with-geoip-v1"',
+        },
+      });
+    };
+
+    const result = await refreshGeositeRun(env, {
+      now: () => Date.parse("2026-02-15T01:00:00.000Z"),
+      fetchImpl,
+    });
+
+    expect(result.updated).toBe(true);
+    expect(result.etag).toBe("etag-refresh-with-geoip-v1");
+
+    const latestRaw = await bucket.get("state/latest.json");
+    expect(latestRaw).not.toBeNull();
+    const latest = JSON.parse(await latestRaw!.text()) as {
+      geoipSnapshot?: { sourceKey: string };
+    };
+
+    expect(latest.geoipSnapshot).toBeDefined();
+
+    const lists = await readGeoipSnapshotLists(
+      bucket,
+      latest.geoipSnapshot!.sourceKey,
+    );
+    expect(lists.cn).toEqual({
+      ipv4Cidrs: ["1.1.1.0/24"],
+      ipv6Cidrs: ["2001:db8:0:0:0:0:0:0/32"],
+      reverseMatch: false,
+    });
   });
 
   test("updates snapshot when etag changes", async () => {
@@ -537,6 +727,25 @@ describe("worker fetch routes", () => {
     );
     expect(rulesResponse.status).toBe(503);
     expect(await rulesResponse.text()).toBe("geosite data not ready");
+
+    const geoipIndexResponse = await worker.fetch(
+      new Request("https://example.com/geoip"),
+      env,
+      new TestContext(),
+    );
+    expect(geoipIndexResponse.status).toBe(503);
+    expect(await geoipIndexResponse.json()).toEqual({
+      ok: false,
+      error: "geoip data not ready",
+    });
+
+    const geoipRulesResponse = await worker.fetch(
+      new Request("https://example.com/geoip/cn"),
+      env,
+      new TestContext(),
+    );
+    expect(geoipRulesResponse.status).toBe(503);
+    expect(await geoipRulesResponse.text()).toBe("geoip data not ready");
     expect(calls).toEqual([]);
   });
 
@@ -595,6 +804,91 @@ describe("worker fetch routes", () => {
     expect(cached).not.toBeNull();
 
     await ctx.drain();
+  });
+
+  test("serves geoip rules and no_resolve variant with distinct etag", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+
+    await bucket.putJson("state/latest.json", {
+      upstream: {
+        zipUrl: "https://example.com/master.zip",
+        etag: "etag-geoip-v1",
+      },
+      snapshot: {
+        sourceKey: "snapshots/etag-geoip-v1/sources.json.gz",
+        indexKey: "snapshots/etag-geoip-v1/index/geosite.json",
+        listCount: 1,
+        generatedAt: "2026-02-15T00:00:00.000Z",
+      },
+      geoipSnapshot: {
+        sourceKey: "snapshots/etag-geoip-v1/geoip/sources.json.gz",
+        indexKey: "snapshots/etag-geoip-v1/index/geoip.json",
+        listCount: 1,
+        generatedAt: "2026-02-15T00:00:00.000Z",
+      },
+      previousEtag: null,
+      checkedAt: "2026-02-15T00:00:00.000Z",
+    });
+
+    await bucket.put(
+      "snapshots/etag-geoip-v1/geoip/sources.json.gz",
+      makeGeoipSnapshotPayload("etag-geoip-v1", {
+        cn: {
+          ipv4Cidrs: ["1.1.1.0/24"],
+          ipv6Cidrs: ["2001:db8:0:0:0:0:0:0/32"],
+          reverseMatch: false,
+        },
+      }),
+    );
+
+    await bucket.putJson("snapshots/etag-geoip-v1/index/geoip.json", {
+      cn: {
+        name: "CN",
+        sourceFile: "cn",
+        ipv4Count: 1,
+        ipv6Count: 1,
+        defaultPath: "geoip/cn.yaml",
+        noResolvePath: "geoip/cn.yaml?no_resolve=true",
+      },
+    });
+
+    const worker = createWorker();
+
+    const indexResponse = await worker.fetch(
+      new Request("https://example.com/geoip"),
+      env,
+      new TestContext(),
+    );
+    expect(indexResponse.status).toBe(200);
+    const index = (await indexResponse.json()) as {
+      cn: { ipv4Count: number; ipv6Count: number };
+    };
+    expect(index.cn).toMatchObject({ ipv4Count: 1, ipv6Count: 1 });
+
+    const normal = await worker.fetch(
+      new Request("https://example.com/geoip/cn"),
+      env,
+      new TestContext(),
+    );
+    expect(normal.status).toBe(200);
+    const normalBody = await normal.text();
+    expect(normalBody).toContain("ip_cidr_set:");
+    expect(normalBody).toContain('"1.1.1.0/24"');
+    expect(normalBody).not.toContain("no_resolve: true");
+
+    const noResolve = await worker.fetch(
+      new Request("https://example.com/geoip/cn?no_resolve=true"),
+      env,
+      new TestContext(),
+    );
+    expect(noResolve.status).toBe(200);
+    expect(noResolve.headers.get("x-no-resolve")).toBe("1");
+    const noResolveBody = await noResolve.text();
+    expect(noResolveBody.startsWith("no_resolve: true\n")).toBe(true);
+    expect(noResolveBody).toContain('"1.1.1.0/24"');
+
+    expect(normal.headers.get("etag")).not.toBe(noResolve.headers.get("etag"));
   });
 
   test("supports .yaml suffix on geosite route", async () => {

@@ -3,7 +3,7 @@
   <p>
     中文 | <a href="./README.md">English</a>
   </p>
-  <p>自动转换 <code>Loyalsoldier/v2ray-rules-dat</code> 数据集为 Egern 可直接使用的规则集。</p>
+  <p>自动转换 <code>Loyalsoldier/v2ray-rules-dat</code> 数据集（geosite + geoip）为 Egern 可直接使用的规则集。</p>
   <p>
     <a href="https://egern.slinet.moe"><strong>打开可视化面板</strong></a>
   </p>
@@ -24,6 +24,8 @@
 
 - 推荐规则路径：`https://egern.slinet.moe/geosite/:name_with_filter.yaml`
 - 兼容路径（同样可用）：`https://egern.slinet.moe/geosite/:name_with_filter`
+- GeoIP 规则路径：`https://egern.slinet.moe/geoip/:country_code.yaml`
+- GeoIP 跳过 DNS 解析：`https://egern.slinet.moe/geoip/:country_code.yaml?no_resolve=true`
 
 `name_with_filter` 有两种：
 
@@ -31,6 +33,11 @@
   返回 `apple` 这个数据集的完整规则。
 - 带 filter：`apple@cn`
   只返回带 `@cn` 标签的规则。
+
+`country_code` 示例：
+
+- `cn`
+  返回 `CN` 这个 GeoIP 数据集转换后的 CIDR 规则。
 
 Egern 引用示例：
 
@@ -44,6 +51,10 @@ rules:
       match: "https://egern.slinet.moe/geosite/strict/proxy-list.yaml"
       policy: Proxy
       update_interval: 86400
+  - rule_set:
+      match: "https://egern.slinet.moe/geoip/cn.yaml?no_resolve=true"
+      policy: DIRECT
+      update_interval: 86400
 ```
 
 ## 高级使用
@@ -53,6 +64,9 @@ rules:
 - `GET /geosite`
 - `GET /geosite/:name_with_filter` 或 `GET /geosite/:name_with_filter.yaml`（默认模式：`balanced`）
 - `GET /geosite/:mode/:name_with_filter` 或 `GET /geosite/:mode/:name_with_filter.yaml`
+- `GET /geoip`
+- `GET /geoip/:country_code` 或 `GET /geoip/:country_code.yaml`
+- `GET /geoip/:country_code?no_resolve=true` 或 `GET /geoip/:country_code.yaml?no_resolve=true`
 - `GET /geosite-srs/:name` 或 `GET /geosite-srs/:name.srs`
 - `GET /geosite-mrs/:name` 或 `GET /geosite-mrs/:name.mrs`
 
