@@ -429,13 +429,21 @@
     previewText = tr("filterInputLoading");
   }
 
+  function toClipboardUrl(href: string): string {
+    try {
+      return new URL(href, window.location.origin).toString();
+    } catch {
+      return href;
+    }
+  }
+
   async function onCopyLink(key: string, href: string) {
     if (!browser) {
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(href);
+      await navigator.clipboard.writeText(toClipboardUrl(href));
       copiedLinkKey = key;
 
       if (copiedQuickLinkTimer) {
