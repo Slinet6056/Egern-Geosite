@@ -99,6 +99,11 @@ interface SnapshotMeta {
   generatedAt: string;
 }
 
+interface GeoipPendingMeta {
+  sourceKey: string;
+  generatedAt: string;
+}
+
 interface LatestState {
   upstream: {
     zipUrl: string;
@@ -106,6 +111,7 @@ interface LatestState {
   };
   snapshot: SnapshotMeta;
   geoipSnapshot?: SnapshotMeta;
+  geoipPending?: GeoipPendingMeta;
   previousEtag: string | null;
   checkedAt: string;
 }
@@ -154,7 +160,7 @@ type GeoipIndex = Record<string, GeoipIndexEntry>;
 
 interface RefreshResult {
   updated: boolean;
-  reason: "etag-unchanged" | "etag-updated";
+  reason: "etag-unchanged" | "etag-updated" | "geoip-finalized";
   checkedAt: string;
   etag: string;
   listCount: number;
@@ -271,6 +277,21 @@ export async function refreshGeositeRun(
 
   const observedHeadEtag = normalizeEtag(headResponse.headers.get("etag"));
   if (observedHeadEtag && current?.upstream.etag === observedHeadEtag) {
+    const finalized = await finalizePendingGeoipSnapshot(
+      env,
+      current,
+      checkedAt,
+    );
+    if (finalized) {
+      return {
+        updated: true,
+        reason: "geoip-finalized",
+        checkedAt,
+        etag: current.upstream.etag,
+        listCount: current.snapshot.listCount,
+      };
+    }
+
     const unchangedState: LatestState = {
       ...current,
       checkedAt,
@@ -303,6 +324,21 @@ export async function refreshGeositeRun(
     downloadedEtag ?? observedHeadEtag ?? (await sha256Hex(zipBytes));
 
   if (current?.upstream.etag === computedEtag) {
+    const finalized = await finalizePendingGeoipSnapshot(
+      env,
+      current,
+      checkedAt,
+    );
+    if (finalized) {
+      return {
+        updated: true,
+        reason: "geoip-finalized",
+        checkedAt,
+        etag: current.upstream.etag,
+        listCount: current.snapshot.listCount,
+      };
+    }
+
     const unchangedState: LatestState = {
       ...current,
       checkedAt,
@@ -320,7 +356,7 @@ export async function refreshGeositeRun(
 
   const extracted = extractSourcesFromZip(zipBytes);
   const sources = extracted.geositeSources;
-  const geoipSources = extracted.geoipSources;
+  const geoipDat = extracted.geoipDat;
   const listCount = Object.keys(sources).length;
   if (listCount === 0) {
     throw new Error("no geosite data files found in upstream zip");
@@ -332,9 +368,7 @@ export async function refreshGeositeRun(
   const generatedAt = new Date(now()).toISOString();
   const sourceKey = snapshotSourceKey(computedEtag);
   const indexKey = snapshotIndexKey(computedEtag);
-  const geoipListCount = Object.keys(geoipSources).length;
-  const geoipSourceKey = geoipSnapshotSourceKey(computedEtag);
-  const geoipIndexKey = geoipSnapshotIndexKey(computedEtag);
+  const geoipPendingKey = geoipPendingSourceKey(computedEtag);
 
   const snapshotPayload: SnapshotPayload = {
     version: 1,
@@ -343,20 +377,9 @@ export async function refreshGeositeRun(
     generatedAt,
     lists: sources,
   };
-  const geoipSnapshotPayload: GeoipSnapshotPayload = {
-    version: 1,
-    etag: computedEtag,
-    zipUrl,
-    generatedAt,
-    lists: geoipSources,
-  };
 
   const compressedSnapshot = gzipSync(strToU8(JSON.stringify(snapshotPayload)));
-  const compressedGeoipSnapshot = gzipSync(
-    strToU8(JSON.stringify(geoipSnapshotPayload)),
-  );
   const index = buildIndexFromSources(sources);
-  const geoipIndex = buildGeoipIndexFromSources(geoipSources);
 
   await writeBinary(env.GEOSITE_BUCKET, sourceKey, compressedSnapshot, {
     contentType: "application/json",
@@ -364,17 +387,11 @@ export async function refreshGeositeRun(
   });
   await writeJson(env.GEOSITE_BUCKET, indexKey, index);
 
-  if (geoipListCount > 0) {
-    await writeBinary(
-      env.GEOSITE_BUCKET,
-      geoipSourceKey,
-      compressedGeoipSnapshot,
-      {
-        contentType: "application/json",
-        cacheControl: "public, max-age=31536000, immutable",
-      },
-    );
-    await writeJson(env.GEOSITE_BUCKET, geoipIndexKey, geoipIndex);
+  if (geoipDat) {
+    await writeBinary(env.GEOSITE_BUCKET, geoipPendingKey, geoipDat, {
+      contentType: "application/octet-stream",
+      cacheControl: "public, max-age=31536000, immutable",
+    });
   }
 
   const snapshotMeta: SnapshotMeta = {
@@ -384,15 +401,12 @@ export async function refreshGeositeRun(
     generatedAt,
   };
 
-  const geoipSnapshotMeta: SnapshotMeta | undefined =
-    geoipListCount > 0
-      ? {
-          sourceKey: geoipSourceKey,
-          indexKey: geoipIndexKey,
-          listCount: geoipListCount,
-          generatedAt,
-        }
-      : undefined;
+  const geoipPendingMeta: GeoipPendingMeta | undefined = geoipDat
+    ? {
+        sourceKey: geoipPendingKey,
+        generatedAt,
+      }
+    : undefined;
 
   const nextState: LatestState = {
     upstream: {
@@ -400,7 +414,7 @@ export async function refreshGeositeRun(
       etag: computedEtag,
     },
     snapshot: snapshotMeta,
-    ...(geoipSnapshotMeta ? { geoipSnapshot: geoipSnapshotMeta } : {}),
+    ...(geoipPendingMeta ? { geoipPending: geoipPendingMeta } : {}),
     previousEtag: current?.upstream.etag ?? null,
     checkedAt,
   };
@@ -435,6 +449,94 @@ export async function refreshGeositeRun(
     etag: computedEtag,
     listCount,
   };
+}
+
+async function finalizePendingGeoipSnapshot(
+  env: WorkerEnv,
+  current: LatestState,
+  checkedAt: string,
+): Promise<boolean> {
+  const pending = current.geoipPending;
+  if (!pending || current.geoipSnapshot) {
+    return false;
+  }
+
+  const latestBeforeWrite = await readJson<LatestState>(
+    env.GEOSITE_BUCKET,
+    LATEST_STATE_KEY,
+  );
+  if (!latestBeforeWrite) {
+    return false;
+  }
+
+  if (latestBeforeWrite.upstream.etag !== current.upstream.etag) {
+    return false;
+  }
+
+  if (latestBeforeWrite.geoipSnapshot) {
+    return false;
+  }
+
+  const activePending = latestBeforeWrite.geoipPending;
+  if (!activePending || activePending.sourceKey !== pending.sourceKey) {
+    return false;
+  }
+
+  const rawObject = await env.GEOSITE_BUCKET.get(activePending.sourceKey);
+  if (!rawObject) {
+    return false;
+  }
+
+  const geoipDat = new Uint8Array(await rawObject.arrayBuffer());
+  const geoipSources = extractSourcesFromGeoipDatBytes(geoipDat);
+  const geoipListCount = Object.keys(geoipSources).length;
+  const generatedAt = activePending.generatedAt;
+  const geoipSourceKey = geoipSnapshotSourceKey(current.upstream.etag);
+  const geoipIndexKey = geoipSnapshotIndexKey(current.upstream.etag);
+
+  const geoipSnapshotPayload: GeoipSnapshotPayload = {
+    version: 1,
+    etag: current.upstream.etag,
+    zipUrl: current.upstream.zipUrl,
+    generatedAt,
+    lists: geoipSources,
+  };
+  const compressedGeoipSnapshot = gzipSync(
+    strToU8(JSON.stringify(geoipSnapshotPayload)),
+  );
+  const geoipIndex = buildGeoipIndexFromSources(geoipSources);
+
+  await writeBinary(
+    env.GEOSITE_BUCKET,
+    geoipSourceKey,
+    compressedGeoipSnapshot,
+    {
+      contentType: "application/json",
+      cacheControl: "public, max-age=31536000, immutable",
+    },
+  );
+  await writeJson(env.GEOSITE_BUCKET, geoipIndexKey, geoipIndex);
+
+  const { geoipPending: _ignored, ...withoutPending } = latestBeforeWrite;
+  const nextState: LatestState = {
+    ...withoutPending,
+    geoipSnapshot: {
+      sourceKey: geoipSourceKey,
+      indexKey: geoipIndexKey,
+      listCount: geoipListCount,
+      generatedAt,
+    },
+    checkedAt,
+  };
+
+  await writeJson(env.GEOSITE_BUCKET, LATEST_STATE_KEY, nextState);
+  geoipSnapshotCache.clear();
+
+  if (env.GEOSITE_BUCKET.delete) {
+    await env.GEOSITE_BUCKET.delete(activePending.sourceKey);
+  }
+
+  return true;
 }
 
 async function handleFetch(
@@ -1648,7 +1750,7 @@ function collectFilters(entries: DomainRule[]): string[] {
 
 function extractSourcesFromZip(zipData: Uint8Array): {
   geositeSources: Record<string, string>;
-  geoipSources: Record<string, GeoipListPayload>;
+  geoipDat: Uint8Array | null;
 } {
   const files = unzipSync(zipData);
   const geositeSources = extractSourcesFromGeositeDat(files);
@@ -1656,17 +1758,24 @@ function extractSourcesFromZip(zipData: Uint8Array): {
     throw new Error("no geosite.dat found in upstream zip");
   }
 
-  let geoipSources: Record<string, GeoipListPayload> = {};
-  try {
-    geoipSources = extractSourcesFromGeoipDat(files) ?? {};
-  } catch {
-    geoipSources = {};
-  }
+  const geoipDat = extractGeoipDatFile(files);
 
   return {
     geositeSources,
-    geoipSources,
+    geoipDat,
   };
+}
+
+function extractGeoipDatFile(
+  files: Record<string, Uint8Array>,
+): Uint8Array | null {
+  for (const [filePath, content] of Object.entries(files)) {
+    if (/\/geoip\.dat$/i.test(filePath)) {
+      return content;
+    }
+  }
+
+  return null;
 }
 
 interface GeositeDatDomain {
@@ -1880,29 +1989,26 @@ function toGeositeSourceLine(domain: GeositeDatDomain): string | null {
   return `${prefix} ${attrs.map((attr) => `@${attr}`).join(" ")}`;
 }
 
-function extractSourcesFromGeoipDat(
-  files: Record<string, Uint8Array>,
-): Record<string, GeoipListPayload> | null {
-  for (const [filePath, content] of Object.entries(files)) {
-    if (!/\/geoip\.dat$/i.test(filePath)) {
-      continue;
+function extractSourcesFromGeoipDatBytes(
+  content: Uint8Array,
+): Record<string, GeoipListPayload> {
+  const reader: ProtoReader = { input: content, offset: 0 };
+  const grouped = new Map<
+    string,
+    {
+      ipv4: Set<string>;
+      ipv6: Set<string>;
+      reverseMatch: boolean;
     }
+  >();
 
-    const parsed = parseGeoipDat(content);
-    if (parsed.length === 0) {
-      throw new Error("geoip.dat is empty");
-    }
+  while (!protoEof(reader)) {
+    const tag = readVarint(reader);
+    const field = tag >>> 3;
+    const wireType = tag & 0x07;
 
-    const grouped = new Map<
-      string,
-      {
-        ipv4: Set<string>;
-        ipv6: Set<string>;
-        reverseMatch: boolean;
-      }
-    >();
-
-    for (const entry of parsed) {
+    if (field === 1 && wireType === 2) {
+      const entry = parseGeoipDatEntry(readLengthDelimited(reader));
       const listName = entry.countryCode.trim().toLowerCase();
       if (!VALID_LIST_NAME.test(listName)) {
         continue;
@@ -1929,45 +2035,26 @@ function extractSourcesFromGeoipDat(
 
       current.reverseMatch = current.reverseMatch || entry.reverseMatch;
       grouped.set(listName, current);
-    }
-
-    if (grouped.size === 0) {
-      throw new Error("geoip.dat contains no valid list names");
-    }
-
-    const sources: Record<string, GeoipListPayload> = {};
-    for (const [listName, item] of grouped.entries()) {
-      sources[listName] = {
-        ipv4Cidrs: Array.from(item.ipv4).sort(),
-        ipv6Cidrs: Array.from(item.ipv6).sort(),
-        reverseMatch: item.reverseMatch,
-      };
-    }
-
-    return sources;
-  }
-
-  return null;
-}
-
-function parseGeoipDat(input: Uint8Array): GeoipDatEntry[] {
-  const reader: ProtoReader = { input, offset: 0 };
-  const entries: GeoipDatEntry[] = [];
-
-  while (!protoEof(reader)) {
-    const tag = readVarint(reader);
-    const field = tag >>> 3;
-    const wireType = tag & 0x07;
-
-    if (field === 1 && wireType === 2) {
-      entries.push(parseGeoipDatEntry(readLengthDelimited(reader)));
       continue;
     }
 
     skipField(reader, wireType);
   }
 
-  return entries;
+  if (grouped.size === 0) {
+    throw new Error("geoip.dat contains no valid list names");
+  }
+
+  const sources: Record<string, GeoipListPayload> = {};
+  for (const [listName, item] of grouped.entries()) {
+    sources[listName] = {
+      ipv4Cidrs: Array.from(item.ipv4),
+      ipv6Cidrs: Array.from(item.ipv6),
+      reverseMatch: item.reverseMatch,
+    };
+  }
+
+  return sources;
 }
 
 function parseGeoipDatEntry(input: Uint8Array): GeoipDatEntry {
@@ -2199,6 +2286,10 @@ function snapshotSourceKey(etag: string): string {
 
 function geoipSnapshotSourceKey(etag: string): string {
   return `snapshots/${etag}/geoip/sources.json.gz`;
+}
+
+function geoipPendingSourceKey(etag: string): string {
+  return `snapshots/${etag}/geoip/raw.dat`;
 }
 
 function snapshotIndexKey(etag: string): string {

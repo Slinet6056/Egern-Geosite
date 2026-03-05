@@ -368,7 +368,7 @@ describe("refreshGeositeRun", () => {
     expect(lists.google).toContain("keyword:googlevideo");
   });
 
-  test("parses geoip.dat and stores geoip snapshot when present", async () => {
+  test("stores geoip.dat as pending and finalizes snapshot on next unchanged cron", async () => {
     const bucket = new MemoryR2Bucket();
     const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
 
@@ -397,11 +397,13 @@ describe("refreshGeositeRun", () => {
       "v2ray-rules-dat-release/geoip.dat": geoipDat,
     });
 
+    const calls: string[] = [];
     const fetchImpl: typeof fetch = async (
       _input: RequestInfo | URL,
       init?: RequestInit,
     ): Promise<Response> => {
       const method = (init?.method ?? "GET").toUpperCase();
+      calls.push(method);
       if (method === "HEAD") {
         return new Response(null, {
           status: 200,
@@ -430,14 +432,36 @@ describe("refreshGeositeRun", () => {
     const latestRaw = await bucket.get("state/latest.json");
     expect(latestRaw).not.toBeNull();
     const latest = JSON.parse(await latestRaw!.text()) as {
+      geoipPending?: { sourceKey: string };
       geoipSnapshot?: { sourceKey: string };
     };
 
-    expect(latest.geoipSnapshot).toBeDefined();
+    expect(latest.geoipSnapshot).toBeUndefined();
+    expect(latest.geoipPending).toBeDefined();
+    expect(await bucket.get(latest.geoipPending!.sourceKey)).not.toBeNull();
+
+    const finalized = await refreshGeositeRun(env, {
+      now: () => Date.parse("2026-02-15T01:05:00.000Z"),
+      fetchImpl,
+    });
+
+    expect(finalized.updated).toBe(true);
+    expect(finalized.reason).toBe("geoip-finalized");
+    expect(calls).toEqual(["HEAD", "GET", "HEAD"]);
+
+    const finalizedLatestRaw = await bucket.get("state/latest.json");
+    expect(finalizedLatestRaw).not.toBeNull();
+    const finalizedLatest = JSON.parse(await finalizedLatestRaw!.text()) as {
+      geoipPending?: { sourceKey: string };
+      geoipSnapshot?: { sourceKey: string };
+    };
+
+    expect(finalizedLatest.geoipPending).toBeUndefined();
+    expect(finalizedLatest.geoipSnapshot).toBeDefined();
 
     const lists = await readGeoipSnapshotLists(
       bucket,
-      latest.geoipSnapshot!.sourceKey,
+      finalizedLatest.geoipSnapshot!.sourceKey,
     );
     expect(lists.cn).toEqual({
       ipv4Cidrs: ["1.1.1.0/24"],

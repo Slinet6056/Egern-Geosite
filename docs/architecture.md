@@ -23,12 +23,14 @@ Recommended route priority:
 
 1. Cron runs every 5 minutes.
 2. Worker sends `HEAD` to upstream ZIP (`Loyalsoldier/v2ray-rules-dat`, release branch ZIP).
-3. If ETag unchanged: only update check timestamp.
+3. If ETag unchanged:
+   - If geoip is pending, finalize geoip snapshot/index from stored raw data.
+   - Otherwise only update check timestamp.
 4. If ETag changed:
    - Download ZIP once.
    - Parse `geosite.dat` into source lists and validate parse/resolve.
-   - Parse `geoip.dat` into CIDR source lists (best effort, does not block geosite publish).
-   - Write snapshot and index to R2.
+   - Store raw `geoip.dat` as pending data for a later finalize pass.
+   - Write geosite snapshot and index to R2.
    - Atomically switch `state/latest.json`.
 
 ## Serve Pipeline
@@ -68,6 +70,7 @@ Recommended route priority:
 - `snapshots/{etag}/sources.json.gz`
 - `snapshots/{etag}/index/geosite.json`
 - `artifacts/{etag}/{mode}/{name[@filter]}.yaml`
+- `snapshots/{etag}/geoip/raw.dat`
 - `snapshots/{etag}/geoip/sources.json.gz`
 - `snapshots/{etag}/index/geoip.json`
 - `artifacts/{etag}/geoip/{country}.yaml`

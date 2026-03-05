@@ -17,8 +17,9 @@ Cloudflare Worker runtime for geosite/geoip API serving with built-in cron refre
 
 - `scheduled`:
   - HEAD upstream ZIP to check ETag.
-  - If ETag unchanged: update check timestamp only.
-  - If ETag changed: download ZIP once, parse `geosite.dat` and `geoip.dat`, write snapshots + indexes to R2, then update `state/latest.json`.
+  - If ETag changed: download ZIP once, parse `geosite.dat`, write geosite snapshot/index, and store raw `geoip.dat` as pending data in R2.
+  - If ETag unchanged but geoip is pending: parse pending raw `geoip.dat`, write geoip snapshot/index, then mark geoip as ready.
+  - If ETag unchanged and no pending geoip: update check timestamp only.
 - `fetch`:
   - Route `/geosite*` and `/geoip*` requests to API handlers.
   - API handlers read latest state from R2.
@@ -33,6 +34,7 @@ Cloudflare Worker runtime for geosite/geoip API serving with built-in cron refre
 - `state/latest.json`
 - `snapshots/{etag}/sources.json.gz`
 - `snapshots/{etag}/index/geosite.json`
+- `snapshots/{etag}/geoip/raw.dat`
 - `snapshots/{etag}/geoip/sources.json.gz`
 - `snapshots/{etag}/index/geoip.json`
 - `artifacts/{etag}/{mode}/{name[@filter]}.yaml`
