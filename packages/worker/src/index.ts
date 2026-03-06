@@ -307,7 +307,7 @@ export async function refreshGeositeRun(
   }
   // Validate snapshot can be parsed and resolved before publishing it as latest.
   const parsed = parseListsFromText(sources);
-  void resolveAllLists(parsed);
+  const resolvedLists = resolveAllLists(parsed);
 
   const generatedAt = new Date(now()).toISOString();
   const sourceKey = snapshotSourceKey(computedEtag);
@@ -323,7 +323,7 @@ export async function refreshGeositeRun(
   };
 
   const compressedSnapshot = gzipSync(strToU8(JSON.stringify(snapshotPayload)));
-  const index = buildIndexFromSources(sources);
+  const index = buildIndexFromSources(sources, resolvedLists);
 
   await writeBinary(env.GEOSITE_BUCKET, sourceKey, compressedSnapshot, {
     contentType: "application/json",
@@ -586,7 +586,8 @@ async function handleGeositeIndex(
   }
 
   const snapshot = await loadSnapshotPayload(env, latest);
-  const builtIndex = buildIndexFromSources(snapshot.lists);
+  const resolvedLists = await loadResolvedLists(env, latest);
+  const builtIndex = buildIndexFromSources(snapshot.lists, resolvedLists);
   ctx.waitUntil(
     writeJson(env.GEOSITE_BUCKET, latest.snapshot.indexKey, builtIndex),
   );
@@ -681,11 +682,7 @@ async function handleGeositeRules(
       const responseEtag = buildRulesEtag(latest.previousEtag, name, filter);
       const headers = responseHeaders(latest.previousEtag, name, filter, true);
       ctx.waitUntil(
-        compilePromise
-          .then((result) =>
-            maybeEnrichIndexFilters(env, latest, name, result.availableFilters),
-          )
-          .catch(() => undefined),
+        compilePromise.then(() => undefined).catch(() => undefined),
       );
 
       if (
@@ -700,12 +697,6 @@ async function handleGeositeRules(
   const build = await compilePromise;
   if (!build.listFound) {
     return text(404, `list not found: ${name}`);
-  }
-
-  if (build.availableFilters.length > 0) {
-    ctx.waitUntil(
-      maybeEnrichIndexFilters(env, latest, name, build.availableFilters),
-    );
   }
 
   const responseEtag = buildRulesEtag(latest.upstream.etag, name, filter);
@@ -1157,55 +1148,20 @@ async function ensureLatestState(env: WorkerEnv): Promise<LatestState | null> {
   return readJson<LatestState>(env.GEOSITE_BUCKET, LATEST_STATE_KEY);
 }
 
-async function maybeEnrichIndexFilters(
-  env: WorkerEnv,
-  latest: LatestState,
-  listName: string,
-  filters: string[],
-): Promise<void> {
-  if (filters.length === 0) {
-    return;
-  }
-
-  const normalizedFilters = [...new Set(filters)].sort();
-  const index = await readJson<GeositeIndex>(
-    env.GEOSITE_BUCKET,
-    latest.snapshot.indexKey,
-  );
-  if (!index) {
-    return;
-  }
-
-  const lookupName = listName.toLowerCase();
-  const current = index[lookupName];
-  if (!current) {
-    return;
-  }
-
-  if (isSameStringArray(current.filters, normalizedFilters)) {
-    return;
-  }
-
-  const nextIndex: GeositeIndex = {
-    ...index,
-    [lookupName]: {
-      ...current,
-      filters: normalizedFilters,
-    },
-  };
-
-  await writeJson(env.GEOSITE_BUCKET, latest.snapshot.indexKey, nextIndex);
-}
-
-function buildIndexFromSources(sources: Record<string, string>): GeositeIndex {
+function buildIndexFromSources(
+  sources: Record<string, string>,
+  resolvedLists?: Record<string, ResolvedList>,
+): GeositeIndex {
   const names = Object.keys(sources).sort();
   const index: GeositeIndex = {};
 
   for (const listName of names) {
+    const resolved = resolvedLists?.[listName.toUpperCase()];
+
     index[listName] = {
       name: listName.toUpperCase(),
       sourceFile: listName,
-      filters: [],
+      filters: resolved ? collectFilters(resolved.entries) : [],
       path: `rules/${listName}.yaml`,
     };
   }
@@ -1942,20 +1898,6 @@ function pruneMap<T>(map: Map<string, T>, keep: number): void {
     }
     map.delete(first.value);
   }
-}
-
-function isSameStringArray(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 function json(

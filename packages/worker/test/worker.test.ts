@@ -359,13 +359,22 @@ describe("refreshGeositeRun", () => {
     const latestRaw = await bucket.get("state/latest.json");
     expect(latestRaw).not.toBeNull();
     const latest = JSON.parse(await latestRaw!.text()) as {
-      snapshot: { sourceKey: string };
+      snapshot: { sourceKey: string; indexKey: string };
     };
 
     const lists = await readSnapshotLists(bucket, latest.snapshot.sourceKey);
     expect(Object.keys(lists).sort()).toEqual(["github", "google"]);
     expect(lists.google).toContain("domain:google.com @cn");
     expect(lists.google).toContain("keyword:googlevideo");
+
+    const indexRaw = await bucket.get(latest.snapshot.indexKey);
+    expect(indexRaw).not.toBeNull();
+    const index = JSON.parse(await indexRaw!.text()) as {
+      github: { filters: string[] };
+      google: { filters: string[] };
+    };
+    expect(index.github.filters).toEqual([]);
+    expect(index.google.filters).toEqual(["cn"]);
   });
 
   test("stores geoip.dat as pending and finalizes snapshot on next unchanged cron", async () => {
@@ -773,6 +782,58 @@ describe("worker fetch routes", () => {
     expect(calls).toEqual([]);
   });
 
+  test("rebuilds missing geosite index with prefilled filters", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+
+    await bucket.putJson("state/latest.json", {
+      upstream: {
+        zipUrl: "https://example.com/master.zip",
+        etag: "etag-index-rebuild-v1",
+      },
+      snapshot: {
+        sourceKey: "snapshots/etag-index-rebuild-v1/sources.json.gz",
+        indexKey: "snapshots/etag-index-rebuild-v1/index/geosite.json",
+        listCount: 1,
+        generatedAt: "2026-02-15T00:00:00.000Z",
+      },
+      previousEtag: null,
+      checkedAt: "2026-02-15T00:00:00.000Z",
+    });
+
+    await bucket.put(
+      "snapshots/etag-index-rebuild-v1/sources.json.gz",
+      makeSnapshotPayload("etag-index-rebuild-v1", {
+        google: "domain:google.com @cn\n",
+      }),
+    );
+
+    const ctx = new TestContext();
+    const worker = createWorker();
+    const indexResponse = await worker.fetch(
+      new Request("https://example.com/geosite"),
+      env,
+      ctx,
+    );
+
+    expect(indexResponse.status).toBe(200);
+    const index = (await indexResponse.json()) as {
+      google: { filters: string[] };
+    };
+    expect(index.google.filters).toEqual(["cn"]);
+
+    await ctx.drain();
+
+    const storedIndexRaw = await bucket.get(
+      "snapshots/etag-index-rebuild-v1/index/geosite.json",
+    );
+    expect(storedIndexRaw).not.toBeNull();
+    const storedIndex = JSON.parse(await storedIndexRaw!.text()) as {
+      google: { filters: string[] };
+    };
+    expect(storedIndex.google.filters).toEqual(["cn"]);
+  });
+
   test("compiles and serves artifact on first request", async () => {
     const bucket = new MemoryR2Bucket();
     const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
@@ -1146,7 +1207,7 @@ describe("worker fetch routes", () => {
     expect(response.headers.get("x-stale")).toBeNull();
   });
 
-  test("does not cache unknown filter artifacts and lazily enriches index filters", async () => {
+  test("does not cache unknown filter artifacts or rewrite index filters on request", async () => {
     const bucket = new MemoryR2Bucket();
     const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
 
@@ -1211,7 +1272,7 @@ describe("worker fetch routes", () => {
     const index = JSON.parse(await indexRaw!.text()) as {
       google: { filters: string[] };
     };
-    expect(index.google.filters).toEqual(["cn"]);
+    expect(index.google.filters).toEqual([]);
   });
 
   test("recovers from transient snapshot parse failure without poisoned cache", async () => {
