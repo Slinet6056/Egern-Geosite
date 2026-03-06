@@ -652,7 +652,7 @@ async function handleGeositeRules(
     return text(503, "geosite data not ready");
   }
 
-  const latestKey = artifactKey(latest.upstream.etag, name, filter);
+  const latestKey = geositeArtifactKey(latest.upstream.etag, name, filter);
   const latestArtifact = await readText(env.GEOSITE_BUCKET, latestKey);
   if (latestArtifact !== null) {
     const responseEtag = buildRulesEtag(latest.upstream.etag, name, filter);
@@ -676,7 +676,7 @@ async function handleGeositeRules(
   const compilePromise = ensureArtifactForLatest(env, latest, name, filter);
 
   if (!filter && latest.previousEtag && index && index[name]) {
-    const staleKey = artifactKey(latest.previousEtag, name, filter);
+    const staleKey = geositeArtifactKey(latest.previousEtag, name, filter);
     const staleArtifact = await readText(env.GEOSITE_BUCKET, staleKey);
     if (staleArtifact !== null) {
       const responseEtag = buildRulesEtag(latest.previousEtag, name, filter);
@@ -953,7 +953,7 @@ async function ensureArtifactForLatest(
   }
 
   const lock = (async () => {
-    const outputKey = artifactKey(latest.upstream.etag, name, filter);
+    const outputKey = geositeArtifactKey(latest.upstream.etag, name, filter);
     const existing = await readText(env.GEOSITE_BUCKET, outputKey);
     if (existing !== null) {
       return {
@@ -1749,12 +1749,12 @@ function artifactName(name: string, filter: string | null): string {
   return filter ? `${name}@${filter}` : name;
 }
 
-function artifactKey(
+function geositeArtifactKey(
   etag: string,
   name: string,
   filter: string | null,
 ): string {
-  return `artifacts/${etag}/${artifactName(name, filter)}.yaml`;
+  return `artifacts/${etag}/geosite/${artifactName(name, filter)}.yaml`;
 }
 
 function geoipArtifactKey(etag: string, name: string): string {
@@ -1762,7 +1762,7 @@ function geoipArtifactKey(etag: string, name: string): string {
 }
 
 function snapshotSourceKey(etag: string): string {
-  return `snapshots/${etag}/sources.json.gz`;
+  return `snapshots/${etag}/geosite/sources.json.gz`;
 }
 
 function geoipSnapshotSourceKey(etag: string): string {
@@ -1774,11 +1774,11 @@ function geoipPendingSourceKey(etag: string): string {
 }
 
 function snapshotIndexKey(etag: string): string {
-  return `snapshots/${etag}/index/geosite.json`;
+  return `snapshots/${etag}/geosite/index.json`;
 }
 
 function geoipSnapshotIndexKey(etag: string): string {
-  return `snapshots/${etag}/index/geoip.json`;
+  return `snapshots/${etag}/geoip/index.json`;
 }
 
 function isLegacyModeSegment(input: string): boolean {

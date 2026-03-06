@@ -552,8 +552,8 @@ describe("refreshGeositeRun", () => {
         etag: "etag-unchanged-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-unchanged-v1/sources.json.gz",
-        indexKey: "snapshots/etag-unchanged-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-unchanged-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-unchanged-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -595,8 +595,8 @@ describe("refreshGeositeRun", () => {
         etag: "etag-base-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-base-v1/sources.json.gz",
-        indexKey: "snapshots/etag-base-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-base-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-base-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -633,8 +633,8 @@ describe("refreshGeositeRun", () => {
           etag: "etag-other-v3",
         },
         snapshot: {
-          sourceKey: "snapshots/etag-other-v3/sources.json.gz",
-          indexKey: "snapshots/etag-other-v3/index/geosite.json",
+          sourceKey: "snapshots/etag-other-v3/geosite/sources.json.gz",
+          indexKey: "snapshots/etag-other-v3/geosite/index.json",
           listCount: 1,
           generatedAt: "2026-02-15T00:00:00.000Z",
         },
@@ -676,8 +676,8 @@ describe("refreshGeositeRun", () => {
         etag: "etag-stable-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-stable-v1/sources.json.gz",
-        indexKey: "snapshots/etag-stable-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-stable-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-stable-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -723,7 +723,7 @@ describe("refreshGeositeRun", () => {
     };
     expect(latest.upstream.etag).toBe("etag-stable-v1");
     expect(
-      await bucket.get("snapshots/etag-bad-v2/sources.json.gz"),
+      await bucket.get("snapshots/etag-bad-v2/geosite/sources.json.gz"),
     ).toBeNull();
   });
 });
@@ -792,8 +792,8 @@ describe("worker fetch routes", () => {
         etag: "etag-index-rebuild-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-index-rebuild-v1/sources.json.gz",
-        indexKey: "snapshots/etag-index-rebuild-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-index-rebuild-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-index-rebuild-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -802,7 +802,7 @@ describe("worker fetch routes", () => {
     });
 
     await bucket.put(
-      "snapshots/etag-index-rebuild-v1/sources.json.gz",
+      "snapshots/etag-index-rebuild-v1/geosite/sources.json.gz",
       makeSnapshotPayload("etag-index-rebuild-v1", {
         google: "domain:google.com @cn\n",
       }),
@@ -825,7 +825,7 @@ describe("worker fetch routes", () => {
     await ctx.drain();
 
     const storedIndexRaw = await bucket.get(
-      "snapshots/etag-index-rebuild-v1/index/geosite.json",
+      "snapshots/etag-index-rebuild-v1/geosite/index.json",
     );
     expect(storedIndexRaw).not.toBeNull();
     const storedIndex = JSON.parse(await storedIndexRaw!.text()) as {
@@ -844,8 +844,8 @@ describe("worker fetch routes", () => {
         etag: "etag-fetch-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-fetch-v1/sources.json.gz",
-        indexKey: "snapshots/etag-fetch-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-fetch-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-fetch-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -854,12 +854,12 @@ describe("worker fetch routes", () => {
     });
 
     await bucket.put(
-      "snapshots/etag-fetch-v1/sources.json.gz",
+      "snapshots/etag-fetch-v1/geosite/sources.json.gz",
       makeSnapshotPayload("etag-fetch-v1", {
         google: "domain:google.com\nfull:mail.google.com\n",
       }),
     );
-    await bucket.putJson("snapshots/etag-fetch-v1/index/geosite.json", {
+    await bucket.putJson("snapshots/etag-fetch-v1/geosite/index.json", {
       google: {
         name: "GOOGLE",
         sourceFile: "google",
@@ -888,7 +888,9 @@ describe("worker fetch routes", () => {
     expect(body).toContain('"google.com"');
     expect(body).not.toContain("mail.google.com");
 
-    const cached = await bucket.get("artifacts/etag-fetch-v1/google.yaml");
+    const cached = await bucket.get(
+      "artifacts/etag-fetch-v1/geosite/google.yaml",
+    );
     expect(cached).not.toBeNull();
 
     await ctx.drain();
@@ -904,14 +906,14 @@ describe("worker fetch routes", () => {
         etag: "etag-geoip-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-geoip-v1/sources.json.gz",
-        indexKey: "snapshots/etag-geoip-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-geoip-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-geoip-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
       geoipSnapshot: {
         sourceKey: "snapshots/etag-geoip-v1/geoip/sources.json.gz",
-        indexKey: "snapshots/etag-geoip-v1/index/geoip.json",
+        indexKey: "snapshots/etag-geoip-v1/geoip/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -930,7 +932,7 @@ describe("worker fetch routes", () => {
       }),
     );
 
-    await bucket.putJson("snapshots/etag-geoip-v1/index/geoip.json", {
+    await bucket.putJson("snapshots/etag-geoip-v1/geoip/index.json", {
       cn: {
         name: "CN",
         sourceFile: "cn",
@@ -989,8 +991,8 @@ describe("worker fetch routes", () => {
         etag: "etag-suffix-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-suffix-v1/sources.json.gz",
-        indexKey: "snapshots/etag-suffix-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-suffix-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-suffix-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -999,12 +1001,12 @@ describe("worker fetch routes", () => {
     });
 
     await bucket.put(
-      "snapshots/etag-suffix-v1/sources.json.gz",
+      "snapshots/etag-suffix-v1/geosite/sources.json.gz",
       makeSnapshotPayload("etag-suffix-v1", {
         google: "domain:google.com @cn\n",
       }),
     );
-    await bucket.putJson("snapshots/etag-suffix-v1/index/geosite.json", {
+    await bucket.putJson("snapshots/etag-suffix-v1/geosite/index.json", {
       google: {
         name: "GOOGLE",
         sourceFile: "google",
@@ -1068,8 +1070,8 @@ describe("worker fetch routes", () => {
         etag: "etag-stale-v2",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-stale-v2/sources.json.gz",
-        indexKey: "snapshots/etag-stale-v2/index/geosite.json",
+        sourceKey: "snapshots/etag-stale-v2/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-stale-v2/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -1078,12 +1080,12 @@ describe("worker fetch routes", () => {
     });
 
     await bucket.put(
-      "snapshots/etag-stale-v2/sources.json.gz",
+      "snapshots/etag-stale-v2/geosite/sources.json.gz",
       makeSnapshotPayload("etag-stale-v2", {
         google: "domain:google.com\nfull:mail.google.com\n",
       }),
     );
-    await bucket.putJson("snapshots/etag-stale-v2/index/geosite.json", {
+    await bucket.putJson("snapshots/etag-stale-v2/geosite/index.json", {
       google: {
         name: "GOOGLE",
         sourceFile: "google",
@@ -1093,7 +1095,7 @@ describe("worker fetch routes", () => {
     });
 
     await bucket.put(
-      "artifacts/etag-stale-v1/google.yaml",
+      "artifacts/etag-stale-v1/geosite/google.yaml",
       'domain_suffix_set:\n  - "old.example"\n',
     );
 
@@ -1113,7 +1115,9 @@ describe("worker fetch routes", () => {
 
     await ctx.drain();
 
-    const refreshed = await bucket.get("artifacts/etag-stale-v2/google.yaml");
+    const refreshed = await bucket.get(
+      "artifacts/etag-stale-v2/geosite/google.yaml",
+    );
     expect(refreshed).not.toBeNull();
     expect(await refreshed!.text()).toContain('"google.com"');
   });
@@ -1128,8 +1132,8 @@ describe("worker fetch routes", () => {
         etag: "etag-del-v2",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-del-v2/sources.json.gz",
-        indexKey: "snapshots/etag-del-v2/index/geosite.json",
+        sourceKey: "snapshots/etag-del-v2/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-del-v2/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -1138,12 +1142,12 @@ describe("worker fetch routes", () => {
     });
 
     await bucket.put(
-      "snapshots/etag-del-v2/sources.json.gz",
+      "snapshots/etag-del-v2/geosite/sources.json.gz",
       makeSnapshotPayload("etag-del-v2", {
         github: "domain:github.com\n",
       }),
     );
-    await bucket.putJson("snapshots/etag-del-v2/index/geosite.json", {
+    await bucket.putJson("snapshots/etag-del-v2/geosite/index.json", {
       github: {
         name: "GITHUB",
         sourceFile: "github",
@@ -1152,7 +1156,7 @@ describe("worker fetch routes", () => {
       },
     });
     await bucket.put(
-      "artifacts/etag-del-v1/google.yaml",
+      "artifacts/etag-del-v1/geosite/google.yaml",
       'domain_suffix_set:\n  - "old-google.example"\n',
     );
 
@@ -1176,8 +1180,8 @@ describe("worker fetch routes", () => {
         etag: "etag-noindex-v2",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-noindex-v2/sources.json.gz",
-        indexKey: "snapshots/etag-noindex-v2/index/geosite.json",
+        sourceKey: "snapshots/etag-noindex-v2/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-noindex-v2/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -1186,13 +1190,13 @@ describe("worker fetch routes", () => {
     });
 
     await bucket.put(
-      "snapshots/etag-noindex-v2/sources.json.gz",
+      "snapshots/etag-noindex-v2/geosite/sources.json.gz",
       makeSnapshotPayload("etag-noindex-v2", {
         github: "domain:github.com\n",
       }),
     );
     await bucket.put(
-      "artifacts/etag-noindex-v1/google.yaml",
+      "artifacts/etag-noindex-v1/geosite/google.yaml",
       'domain_suffix_set:\n  - "old-google.example"\n',
     );
 
@@ -1217,8 +1221,8 @@ describe("worker fetch routes", () => {
         etag: "etag-filter-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-filter-v1/sources.json.gz",
-        indexKey: "snapshots/etag-filter-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-filter-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-filter-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -1227,12 +1231,12 @@ describe("worker fetch routes", () => {
     });
 
     await bucket.put(
-      "snapshots/etag-filter-v1/sources.json.gz",
+      "snapshots/etag-filter-v1/geosite/sources.json.gz",
       makeSnapshotPayload("etag-filter-v1", {
         google: "domain:google.com @cn\n",
       }),
     );
-    await bucket.putJson("snapshots/etag-filter-v1/index/geosite.json", {
+    await bucket.putJson("snapshots/etag-filter-v1/geosite/index.json", {
       google: {
         name: "GOOGLE",
         sourceFile: "google",
@@ -1252,7 +1256,7 @@ describe("worker fetch routes", () => {
     expect(unknownFilter.status).toBe(200);
     expect(await unknownFilter.text()).toBe("");
     expect(
-      await bucket.get("artifacts/etag-filter-v1/google@us.yaml"),
+      await bucket.get("artifacts/etag-filter-v1/geosite/google@us.yaml"),
     ).toBeNull();
 
     const knownFilter = await worker.fetch(
@@ -1266,7 +1270,7 @@ describe("worker fetch routes", () => {
     await ctx.drain();
 
     const indexRaw = await bucket.get(
-      "snapshots/etag-filter-v1/index/geosite.json",
+      "snapshots/etag-filter-v1/geosite/index.json",
     );
     expect(indexRaw).not.toBeNull();
     const index = JSON.parse(await indexRaw!.text()) as {
@@ -1285,8 +1289,8 @@ describe("worker fetch routes", () => {
         etag: "etag-poison-v1",
       },
       snapshot: {
-        sourceKey: "snapshots/etag-poison-v1/sources.json.gz",
-        indexKey: "snapshots/etag-poison-v1/index/geosite.json",
+        sourceKey: "snapshots/etag-poison-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-poison-v1/geosite/index.json",
         listCount: 1,
         generatedAt: "2026-02-15T00:00:00.000Z",
       },
@@ -1294,7 +1298,7 @@ describe("worker fetch routes", () => {
       checkedAt: "2026-02-15T00:00:00.000Z",
     });
     await bucket.put(
-      "snapshots/etag-poison-v1/sources.json.gz",
+      "snapshots/etag-poison-v1/geosite/sources.json.gz",
       strToU8("not-gzip"),
     );
 
@@ -1308,7 +1312,7 @@ describe("worker fetch routes", () => {
     ).rejects.toThrow();
 
     await bucket.put(
-      "snapshots/etag-poison-v1/sources.json.gz",
+      "snapshots/etag-poison-v1/geosite/sources.json.gz",
       makeSnapshotPayload("etag-poison-v1", {
         google: "domain:google.com\n",
       }),
