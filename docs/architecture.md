@@ -36,10 +36,11 @@ Recommended route priority:
 ## Serve Pipeline
 
 1. Read `state/latest.json`.
-2. Try `artifacts/{etag}/{name[@filter]}.yaml` (`geosite`) or `artifacts/{etag}/geoip/{country}.yaml` (`geoip`).
+2. Try `artifacts/{etag}/geosite/{name[@filter]}.yaml` (`geosite`) or `artifacts/{etag}/geoip/{country}.yaml` (`geoip`).
 3. If hit: return immediately.
 4. If miss:
-   - Optionally return stale artifact from previous ETag (non-filter path), then rebuild latest in background.
+   - Optionally return stale geosite artifact from previous ETag (non-filter path), then rebuild latest in background.
+   - GeoIP only serves stale artifacts after the current `geoipSnapshot` exists; while a new ETag is still pending finalize, `/geoip*` returns `503`.
    - Otherwise build on demand and write artifact.
 
 ## API Surface
@@ -61,15 +62,16 @@ Geosite output is now mode-less and emits upstream regexp entries as `domain_reg
 ## R2 Storage Layout
 
 - `state/latest.json`
-- `snapshots/{etag}/sources.json.gz`
-- `snapshots/{etag}/index/geosite.json`
-- `artifacts/{etag}/{name[@filter]}.yaml`
+- `snapshots/{etag}/geosite/sources.json.gz`
+- `snapshots/{etag}/geosite/index.json`
+- `artifacts/{etag}/geosite/{name[@filter]}.yaml`
 - `snapshots/{etag}/geoip/raw.dat`
 - `snapshots/{etag}/geoip/sources.json.gz`
-- `snapshots/{etag}/index/geoip.json`
+- `snapshots/{etag}/geoip/index.json`
 - `artifacts/{etag}/geoip/{country}.yaml`
 
 ## Operations
 
 - Keep lifecycle policies for `snapshots/` and `artifacts/` (for example 7-30 days).
+- For a clean storage-layout reset, delete `state/latest.json` together with `snapshots/` and `artifacts/`, or run a refresh immediately after the purge so the persisted keys are rebuilt.
 - CLI (`packages/cli`) is for local debug/verification, not required in production serving path.

@@ -21,27 +21,28 @@ Cloudflare Worker runtime for geosite/geoip API serving with built-in cron refre
 - `fetch`:
   - Route `/geosite*` and `/geoip*` requests to API handlers.
   - API handlers read latest state from R2.
-  - Serve prebuilt artifact from `artifacts/{etag}/{name[@filter]}.yaml` (`geosite`) and `artifacts/{etag}/geoip/{country}.yaml` (`geoip`) when available.
+  - Serve prebuilt artifact from `artifacts/{etag}/geosite/{name[@filter]}.yaml` (`geosite`) and `artifacts/{etag}/geoip/{country}.yaml` (`geoip`) when available.
   - On miss, compile on-demand from snapshot and cache artifact.
   - Unknown filters are served as empty output but are not persisted as artifacts.
-  - If previous ETag artifact exists, return stale artifact immediately and refresh latest artifact in background (`waitUntil`).
+  - If previous ETag artifact exists, return stale geosite artifact immediately and refresh latest artifact in background (`waitUntil`). GeoIP can do the same only after the current `geoipSnapshot` exists; while a new ETag is still pending finalization, `/geoip*` returns `503`.
   - On first successful compile for a list, lazily enrich index `filters` for that list.
 
 ## R2 Layout
 
 - `state/latest.json`
-- `snapshots/{etag}/sources.json.gz`
-- `snapshots/{etag}/index/geosite.json`
+- `snapshots/{etag}/geosite/sources.json.gz`
+- `snapshots/{etag}/geosite/index.json`
 - `snapshots/{etag}/geoip/raw.dat`
 - `snapshots/{etag}/geoip/sources.json.gz`
-- `snapshots/{etag}/index/geoip.json`
-- `artifacts/{etag}/{name[@filter]}.yaml`
+- `snapshots/{etag}/geoip/index.json`
+- `artifacts/{etag}/geosite/{name[@filter]}.yaml`
 - `artifacts/{etag}/geoip/{country}.yaml`
 
 Retention:
 
 - Configure R2 Lifecycle rules for `snapshots/` and `artifacts/` prefixes in Cloudflare dashboard.
 - Recommended: keep a short retention window (for example 7-30 days) based on your traffic and rollback needs.
+- For a clean storage-layout reset like this one, delete `state/latest.json` together with `snapshots/` and `artifacts/`. Otherwise unchanged-ETag refreshes keep trusting the persisted keys until the next upstream change.
 
 ## Wrangler
 
