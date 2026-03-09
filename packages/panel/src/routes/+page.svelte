@@ -6,8 +6,11 @@
   import { Check, Copy, ExternalLink, Moon, Sun } from "@lucide/svelte";
 
   import { buildRulesApiPath, buildRulesPublicPath } from "$lib/panel/api";
+  import type { GeoipPanelData } from "$lib/panel/geoip-panel";
   import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
+  import GeoipPanel from "$lib/panel/geoip-panel.svelte";
   import { t } from "$lib/panel/i18n";
+  import { LOCALE_COOKIE_MAX_AGE, LOCALE_COOKIE_NAME } from "$lib/panel/locale";
   import type {
     GeositeIndex,
     PanelLocale,
@@ -36,8 +39,6 @@
   import { Separator } from "$lib/components/ui/separator";
   import { Skeleton } from "$lib/components/ui/skeleton";
 
-  import type { PageData } from "./$types";
-
   const NONE_FILTER = "__none__";
   const SITE_ORIGIN = "https://egern.slinet.moe";
   const THEME_STORAGE_KEY = "egern-panel-theme";
@@ -45,7 +46,24 @@
 
   type ThemePreference = "system" | "light" | "dark";
 
-  export let data: PageData;
+  interface GeositePageData {
+    locale: PanelLocale;
+    index: GeositeIndex;
+    names: string[];
+    selected: string | null;
+    previewText: string;
+    etag: string;
+    stale: string;
+    ruleLines: string;
+    ruleTypeCounts: RuleMatchCounts | null;
+    rawLink: string;
+    initError: string | null;
+    geoipData: GeoipPanelData;
+  }
+
+  type DashboardView = "geosite" | "geoip";
+
+  export let data: GeositePageData;
 
   let locale: PanelLocale;
   let index: GeositeIndex;
@@ -77,6 +95,7 @@
   let canPersistTheme = true;
   let themeModeLabel = "";
   let themeToggleAriaLabel = "";
+  let activeView: DashboardView = "geosite";
 
   let tr: (key: string, vars?: Record<string, string | number>) => string = (
     key,
@@ -91,7 +110,7 @@
         : tr("themeSystem");
   $: themeToggleAriaLabel = tr("themeToggleAria", { mode: themeModeLabel });
 
-  function applyServerData(next: PageData) {
+  function applyServerData(next: GeositePageData) {
     const nextLocale = next.locale as PanelLocale;
     locale = nextLocale;
     index = next.index ?? {};
@@ -174,8 +193,7 @@
   } else {
     listCount = tr("listsCount", { count: names.length });
   }
-  $: canonicalPath = locale === "en" ? "/en" : "/zh";
-  $: canonicalUrl = `${SITE_ORIGIN}${canonicalPath}`;
+  const canonicalUrl = `${SITE_ORIGIN}/`;
 
   $: if (browser) {
     if (manualDebounceTimer) {
@@ -255,6 +273,19 @@
     }
 
     setThemePreference("system");
+  }
+
+  function switchLocale(nextLocale: PanelLocale) {
+    if (!browser || nextLocale === locale) {
+      return;
+    }
+
+    document.cookie = `${LOCALE_COOKIE_NAME}=${nextLocale}; Max-Age=${LOCALE_COOKIE_MAX_AGE}; Path=/; SameSite=Lax`;
+    window.location.reload();
+  }
+
+  function switchView(nextView: DashboardView) {
+    activeView = nextView;
   }
 
   async function loadRules(filter: string | null, force = false) {
@@ -493,9 +524,6 @@
       : "Egern Geosite panel for generating ready-to-use rule sets by dataset and filter."}
   />
   <link rel="canonical" href={canonicalUrl} />
-  <link rel="alternate" hreflang="zh-CN" href={`${SITE_ORIGIN}/zh`} />
-  <link rel="alternate" hreflang="en" href={`${SITE_ORIGIN}/en`} />
-  <link rel="alternate" hreflang="x-default" href={`${SITE_ORIGIN}/en`} />
 </svelte:head>
 
 <main
@@ -508,29 +536,33 @@
       >
         <div class="space-y-1">
           <p class="text-primary text-xs font-semibold tracking-[0.2em]">
-            EGERN GEOSITE
+            {activeView === "geoip" ? "EGERN GEOIP" : "EGERN GEOSITE"}
           </p>
           <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">
-            {tr("appTitle")}
+            {activeView === "geoip" ? tr("geoipAppTitle") : tr("appTitle")}
           </h1>
-          <p class="text-muted-foreground text-sm">{tr("appSubTitle")}</p>
+          <p class="text-muted-foreground text-sm">
+            {activeView === "geoip"
+              ? tr("geoipAppSubTitle")
+              : tr("appSubTitle")}
+          </p>
         </div>
         <div class="flex items-center gap-2">
           <div class="inline-flex overflow-hidden rounded-md border">
-            <a
+            <button
+              type="button"
               class={`px-3 py-1.5 text-sm font-medium transition-colors ${locale === "zh" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
-              href="/zh"
-              data-sveltekit-preload-data="hover"
+              onclick={() => switchLocale("zh")}
             >
               ZH
-            </a>
-            <a
+            </button>
+            <button
+              type="button"
               class={`border-l px-3 py-1.5 text-sm font-medium transition-colors ${locale === "en" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
-              href="/en"
-              data-sveltekit-preload-data="hover"
+              onclick={() => switchLocale("en")}
             >
               EN
-            </a>
+            </button>
           </div>
           <Button
             type="button"
@@ -548,20 +580,20 @@
             <span class="hidden sm:inline">{themeModeLabel}</span>
           </Button>
           <div class="inline-flex overflow-hidden rounded-md border">
-            <a
-              class="bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium"
-              href={`/${locale}`}
-              data-sveltekit-preload-data="hover"
+            <button
+              type="button"
+              class={`px-3 py-1.5 text-sm font-medium transition-colors ${activeView === "geosite" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
+              onclick={() => switchView("geosite")}
             >
               {tr("pageGeosite")}
-            </a>
-            <a
-              class="border-l px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent"
-              href={`/${locale}/geoip`}
-              data-sveltekit-preload-data="hover"
+            </button>
+            <button
+              type="button"
+              class={`border-l px-3 py-1.5 text-sm font-medium transition-colors ${activeView === "geoip" ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
+              onclick={() => switchView("geoip")}
             >
               {tr("pageGeoip")}
-            </a>
+            </button>
           </div>
           <a
             class="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-accent"
@@ -576,280 +608,286 @@
     </div>
   </section>
 
-  <section class="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[18rem_1fr]">
-    <Card class="flex min-h-0 flex-col">
-      <CardHeader class="pb-3">
-        <div class="flex items-center justify-between">
-          <CardTitle class="text-muted-foreground text-xs tracking-[0.14em]"
-            >{tr("datasets")}</CardTitle
-          >
-          <Badge variant="secondary">{listCount}</Badge>
-        </div>
-        <Input
-          type="search"
-          value={search}
-          oninput={(event) =>
-            (search = (event.currentTarget as HTMLInputElement).value)}
-          placeholder={tr("searchPlaceholder")}
-        />
-      </CardHeader>
-      <CardContent class="min-h-0 flex-1 pb-4">
-        <div
-          class="max-h-[38dvh] space-y-1 overflow-auto pr-2 lg:h-full lg:max-h-none"
-        >
-          {#if isIndexLoading && names.length === 0}
-            <div class="space-y-2">
-              <Skeleton class="h-9 w-full" />
-              <Skeleton class="h-9 w-full" />
-              <Skeleton class="h-9 w-full" />
-            </div>
-          {:else if filteredNames.length === 0}
-            <p class="text-muted-foreground px-2 py-3 text-xs">
-              {tr("noMatch")}
-            </p>
-          {:else}
-            {#each displayNames as name (name)}
-              <button
-                type="button"
-                on:click={() => onSelectDataset(name)}
-                class={`hover:border-border flex w-full items-center justify-between border px-3 py-2 text-left text-sm transition-colors ${
-                  selected === name
-                    ? "border-primary text-primary bg-accent"
-                    : "border-transparent"
-                }`}
-              >
-                <span class="font-mono">{name}</span>
-                <span class="text-muted-foreground font-mono text-xs">
-                  @{index[name] ? (index[name]?.filters?.length ?? 0) : "-"}
-                </span>
-              </button>
-            {/each}
-            {#if browser && !hasFullIndex}
-              <p class="text-muted-foreground px-2 py-3 text-xs">
-                {tr("indexHydrating")}
-              </p>
-            {/if}
-          {/if}
-        </div>
-      </CardContent>
-    </Card>
-
-    <Card class="flex min-h-0 flex-col">
-      <CardHeader class="space-y-4">
-        <div
-          class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
-        >
-          <div>
-            <p
-              class="text-muted-foreground text-xs font-semibold tracking-[0.14em]"
-            >
-              {tr("selectedDataset")}
-            </p>
-            <h2 class="mt-1 font-mono text-xl font-semibold">
-              {selectedInfo?.name ?? selected ?? "-"}
-            </h2>
-          </div>
-        </div>
-
-        <div class="grid gap-4 lg:grid-cols-[1fr_17rem]">
-          <div class="grid gap-3 md:grid-cols-2">
-            <label class="space-y-1">
-              <span class="text-muted-foreground block text-xs font-semibold"
-                >{tr("filterTag")}</span
-              >
-              <select
-                class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-                value={selectedFilter}
-                on:change={(event) =>
-                  onFilterChange(
-                    (event.currentTarget as HTMLSelectElement).value,
-                  )}
-              >
-                <option value={NONE_FILTER}>{tr("noneOption")}</option>
-                {#each availableFilters as item}
-                  <option value={item}>{item}</option>
-                {/each}
-              </select>
-            </label>
-
-            <label class="space-y-1">
-              <span class="text-muted-foreground block text-xs font-semibold"
-                >{tr("manualTag")}</span
-              >
-              <Input
-                class="font-mono"
-                placeholder={tr("manualTagPlaceholder")}
-                value={manualFilter}
-                oninput={(event) =>
-                  onManualFilterInput(
-                    (event.currentTarget as HTMLInputElement).value,
-                  )}
-              />
-            </label>
-          </div>
-
-          <div class="flex items-end">
-            <Button
-              class="w-full"
-              onclick={() => loadRules(liveFilter, true)}
-              disabled={!selected || isRulesLoading}
-            >
-              {tr("loadRules")}
-            </Button>
-          </div>
-        </div>
-
-        <div
-          class="text-muted-foreground grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3"
-        >
-          <div>
-            <span>{tr("upstreamEtag")} </span>
-            <span class="font-mono">{etag}</span>
-          </div>
-          <div>
-            <span>{tr("staleFallback")} </span>
-            <span class="font-mono">{stale}</span>
-          </div>
-          <div>
-            <span>{tr("rules")} </span>
-            <span class="font-mono">{ruleLines}</span>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent
-        class="grid min-h-0 flex-1 gap-4 pb-4 lg:grid-cols-[1fr_17rem]"
-      >
-        <section class="flex min-h-0 flex-col gap-2">
+  {#if activeView === "geosite"}
+    <section class="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[18rem_1fr]">
+      <Card class="flex min-h-0 flex-col">
+        <CardHeader class="pb-3">
           <div class="flex items-center justify-between">
-            <h3
-              class="text-muted-foreground text-xs font-semibold tracking-[0.14em]"
+            <CardTitle class="text-muted-foreground text-xs tracking-[0.14em]"
+              >{tr("datasets")}</CardTitle
             >
-              {tr("rulePreview")}
-            </h3>
-            <a
-              class="text-primary text-xs font-semibold hover:underline"
-              href={rawLink}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {tr("openRawUrl")}
-            </a>
+            <Badge variant="secondary">{listCount}</Badge>
           </div>
-          <pre
-            class="border-input bg-muted/40 min-h-56 max-h-[42dvh] overflow-auto border p-3 font-mono text-[12px] leading-5 lg:min-h-0 lg:max-h-none lg:flex-1">{previewText}</pre>
-        </section>
-
-        <aside class="min-h-0 space-y-3 overflow-auto lg:border-l lg:pl-3">
-          {#if initError}
-            <Alert variant="destructive">
-              <AlertTitle>{tr("error")}</AlertTitle>
-              <AlertDescription>{initError}</AlertDescription>
-            </Alert>
-          {/if}
-
-          <section>
-            <h4
-              class="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.14em]"
-            >
-              {tr("datasetInfo")}
-            </h4>
-            <div class="text-muted-foreground space-y-1 text-xs">
-              <p>
-                <span>{tr("sourceFile")} </span>
-                <span class="font-mono">{selectedInfo?.sourceFile ?? "-"}</span>
+          <Input
+            type="search"
+            value={search}
+            oninput={(event) =>
+              (search = (event.currentTarget as HTMLInputElement).value)}
+            placeholder={tr("searchPlaceholder")}
+          />
+        </CardHeader>
+        <CardContent class="min-h-0 flex-1 pb-4">
+          <div
+            class="max-h-[38dvh] space-y-1 overflow-auto pr-2 lg:h-full lg:max-h-none"
+          >
+            {#if isIndexLoading && names.length === 0}
+              <div class="space-y-2">
+                <Skeleton class="h-9 w-full" />
+                <Skeleton class="h-9 w-full" />
+                <Skeleton class="h-9 w-full" />
+              </div>
+            {:else if filteredNames.length === 0}
+              <p class="text-muted-foreground px-2 py-3 text-xs">
+                {tr("noMatch")}
               </p>
-              {#if availableFilters.length > 0}
-                <p>
-                  <span>{tr("filterCount")} </span>
-                  <span class="font-mono">{availableFilters.length}</span>
+            {:else}
+              {#each displayNames as name (name)}
+                <button
+                  type="button"
+                  onclick={() => onSelectDataset(name)}
+                  class={`hover:border-border flex w-full items-center justify-between border px-3 py-2 text-left text-sm transition-colors ${
+                    selected === name
+                      ? "border-primary text-primary bg-accent"
+                      : "border-transparent"
+                  }`}
+                >
+                  <span class="font-mono">{name}</span>
+                  <span class="text-muted-foreground font-mono text-xs">
+                    @{index[name] ? (index[name]?.filters?.length ?? 0) : "-"}
+                  </span>
+                </button>
+              {/each}
+              {#if browser && !hasFullIndex}
+                <p class="text-muted-foreground px-2 py-3 text-xs">
+                  {tr("indexHydrating")}
                 </p>
               {/if}
-              {#if (ruleTypeCounts?.exact ?? 0) > 0}
-                <p>
-                  <span>{tr("exactMatchRules")} </span>
-                  <span class="font-mono">{ruleTypeCounts?.exact}</span>
-                </p>
-              {/if}
-              {#if (ruleTypeCounts?.keyword ?? 0) > 0}
-                <p>
-                  <span>{tr("keywordMatchRules")} </span>
-                  <span class="font-mono">{ruleTypeCounts?.keyword}</span>
-                </p>
-              {/if}
-              {#if (ruleTypeCounts?.suffix ?? 0) > 0}
-                <p>
-                  <span>{tr("suffixMatchRules")} </span>
-                  <span class="font-mono">{ruleTypeCounts?.suffix}</span>
-                </p>
-              {/if}
-              {#if (ruleTypeCounts?.regexp ?? 0) > 0}
-                <p>
-                  <span>{tr("regexMatchRules")} </span>
-                  <span class="font-mono">{ruleTypeCounts?.regexp}</span>
-                </p>
-              {/if}
-              {#if (ruleTypeCounts?.wildcard ?? 0) > 0}
-                <p>
-                  <span>{tr("wildcardMatchRules")} </span>
-                  <span class="font-mono">{ruleTypeCounts?.wildcard}</span>
-                </p>
-              {/if}
+            {/if}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card class="flex min-h-0 flex-col">
+        <CardHeader class="space-y-4">
+          <div
+            class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
+          >
+            <div>
+              <p
+                class="text-muted-foreground text-xs font-semibold tracking-[0.14em]"
+              >
+                {tr("selectedDataset")}
+              </p>
+              <h2 class="mt-1 font-mono text-xl font-semibold">
+                {selectedInfo?.name ?? selected ?? "-"}
+              </h2>
             </div>
+          </div>
+
+          <div class="grid gap-4 lg:grid-cols-[1fr_17rem]">
+            <div class="grid gap-3 md:grid-cols-2">
+              <label class="space-y-1">
+                <span class="text-muted-foreground block text-xs font-semibold"
+                  >{tr("filterTag")}</span
+                >
+                <select
+                  class="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                  value={selectedFilter}
+                  onchange={(event) =>
+                    onFilterChange(
+                      (event.currentTarget as HTMLSelectElement).value,
+                    )}
+                >
+                  <option value={NONE_FILTER}>{tr("noneOption")}</option>
+                  {#each availableFilters as item}
+                    <option value={item}>{item}</option>
+                  {/each}
+                </select>
+              </label>
+
+              <label class="space-y-1">
+                <span class="text-muted-foreground block text-xs font-semibold"
+                  >{tr("manualTag")}</span
+                >
+                <Input
+                  class="font-mono"
+                  placeholder={tr("manualTagPlaceholder")}
+                  value={manualFilter}
+                  oninput={(event) =>
+                    onManualFilterInput(
+                      (event.currentTarget as HTMLInputElement).value,
+                    )}
+                />
+              </label>
+            </div>
+
+            <div class="flex items-end">
+              <Button
+                class="w-full"
+                onclick={() => loadRules(liveFilter, true)}
+                disabled={!selected || isRulesLoading}
+              >
+                {tr("loadRules")}
+              </Button>
+            </div>
+          </div>
+
+          <div
+            class="text-muted-foreground grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3"
+          >
+            <div>
+              <span>{tr("upstreamEtag")} </span>
+              <span class="font-mono">{etag}</span>
+            </div>
+            <div>
+              <span>{tr("staleFallback")} </span>
+              <span class="font-mono">{stale}</span>
+            </div>
+            <div>
+              <span>{tr("rules")} </span>
+              <span class="font-mono">{ruleLines}</span>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent
+          class="grid min-h-0 flex-1 gap-4 pb-4 lg:grid-cols-[1fr_17rem]"
+        >
+          <section class="flex min-h-0 flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <h3
+                class="text-muted-foreground text-xs font-semibold tracking-[0.14em]"
+              >
+                {tr("rulePreview")}
+              </h3>
+              <a
+                class="text-primary text-xs font-semibold hover:underline"
+                href={rawLink}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {tr("openRawUrl")}
+              </a>
+            </div>
+            <pre
+              class="border-input bg-muted/40 min-h-56 max-h-[42dvh] overflow-auto border p-3 font-mono text-[12px] leading-5 lg:min-h-0 lg:max-h-none lg:flex-1">{previewText}</pre>
           </section>
 
-          <Separator />
+          <aside class="min-h-0 space-y-3 overflow-auto lg:border-l lg:pl-3">
+            {#if initError}
+              <Alert variant="destructive">
+                <AlertTitle>{tr("error")}</AlertTitle>
+                <AlertDescription>{initError}</AlertDescription>
+              </Alert>
+            {/if}
 
-          <section>
-            <h4
-              class="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.14em]"
-            >
-              {tr("quickLinks")}
-            </h4>
-            <div class="space-y-1 text-xs">
-              {#if quickLinks.length === 0}
-                <p class="text-muted-foreground">-</p>
-              {:else}
-                {#each quickLinks as item}
-                  <div
-                    class="flex items-center justify-between border px-2 py-1"
+            <section>
+              <h4
+                class="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.14em]"
+              >
+                {tr("datasetInfo")}
+              </h4>
+              <div class="text-muted-foreground space-y-1 text-xs">
+                <p>
+                  <span>{tr("sourceFile")} </span>
+                  <span class="font-mono"
+                    >{selectedInfo?.sourceFile ?? "-"}</span
                   >
-                    <span class="font-mono">{item.label}</span>
-                    <div class="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="outline"
-                        class="h-6 w-6"
-                        aria-label={`${copiedLinkKey === `quick:${item.key}` ? tr("quickCopied") : tr("quickCopy")} ${item.label}`}
-                        onclick={() =>
-                          onCopyLink(`quick:${item.key}`, item.href)}
-                      >
-                        {#if copiedLinkKey === `quick:${item.key}`}
-                          <Check class="size-3.5" />
-                        {:else}
-                          <Copy class="size-3.5" />
-                        {/if}
-                      </Button>
-                      <Button
-                        href={item.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        size="icon-sm"
-                        variant="outline"
-                        class="h-6 w-6"
-                        aria-label={`${tr("quickOpen")} ${item.label}`}
-                      >
-                        <ExternalLink class="size-3.5" />
-                      </Button>
+                </p>
+                {#if availableFilters.length > 0}
+                  <p>
+                    <span>{tr("filterCount")} </span>
+                    <span class="font-mono">{availableFilters.length}</span>
+                  </p>
+                {/if}
+                {#if (ruleTypeCounts?.exact ?? 0) > 0}
+                  <p>
+                    <span>{tr("exactMatchRules")} </span>
+                    <span class="font-mono">{ruleTypeCounts?.exact}</span>
+                  </p>
+                {/if}
+                {#if (ruleTypeCounts?.keyword ?? 0) > 0}
+                  <p>
+                    <span>{tr("keywordMatchRules")} </span>
+                    <span class="font-mono">{ruleTypeCounts?.keyword}</span>
+                  </p>
+                {/if}
+                {#if (ruleTypeCounts?.suffix ?? 0) > 0}
+                  <p>
+                    <span>{tr("suffixMatchRules")} </span>
+                    <span class="font-mono">{ruleTypeCounts?.suffix}</span>
+                  </p>
+                {/if}
+                {#if (ruleTypeCounts?.regexp ?? 0) > 0}
+                  <p>
+                    <span>{tr("regexMatchRules")} </span>
+                    <span class="font-mono">{ruleTypeCounts?.regexp}</span>
+                  </p>
+                {/if}
+                {#if (ruleTypeCounts?.wildcard ?? 0) > 0}
+                  <p>
+                    <span>{tr("wildcardMatchRules")} </span>
+                    <span class="font-mono">{ruleTypeCounts?.wildcard}</span>
+                  </p>
+                {/if}
+              </div>
+            </section>
+
+            <Separator />
+
+            <section>
+              <h4
+                class="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.14em]"
+              >
+                {tr("quickLinks")}
+              </h4>
+              <div class="space-y-1 text-xs">
+                {#if quickLinks.length === 0}
+                  <p class="text-muted-foreground">-</p>
+                {:else}
+                  {#each quickLinks as item}
+                    <div
+                      class="flex items-center justify-between border px-2 py-1"
+                    >
+                      <span class="font-mono">{item.label}</span>
+                      <div class="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="outline"
+                          class="h-6 w-6"
+                          aria-label={`${copiedLinkKey === `quick:${item.key}` ? tr("quickCopied") : tr("quickCopy")} ${item.label}`}
+                          onclick={() =>
+                            onCopyLink(`quick:${item.key}`, item.href)}
+                        >
+                          {#if copiedLinkKey === `quick:${item.key}`}
+                            <Check class="size-3.5" />
+                          {:else}
+                            <Copy class="size-3.5" />
+                          {/if}
+                        </Button>
+                        <Button
+                          href={item.href}
+                          target="_blank"
+                          rel="noreferrer"
+                          size="icon-sm"
+                          variant="outline"
+                          class="h-6 w-6"
+                          aria-label={`${tr("quickOpen")} ${item.label}`}
+                        >
+                          <ExternalLink class="size-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                {/each}
-              {/if}
-            </div>
-          </section>
-        </aside>
-      </CardContent>
-    </Card>
-  </section>
+                  {/each}
+                {/if}
+              </div>
+            </section>
+          </aside>
+        </CardContent>
+      </Card>
+    </section>
+  {:else}
+    <GeoipPanel data={data.geoipData} />
+  {/if}
 </main>
