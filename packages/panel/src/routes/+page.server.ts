@@ -1,19 +1,30 @@
 import type { ServerLoad } from "@sveltejs/kit";
-import { buildGeoipPublicPath, buildRulesPublicPath } from "$lib/panel/api";
+import {
+  buildGeoipPublicPath,
+  buildRulesPublicPath,
+  buildSurgeGeoipPublicPath,
+  buildSurgeRulesPublicPath,
+} from "$lib/panel/api";
 import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
 import { t } from "$lib/panel/i18n";
 import { getPanelLocale } from "$lib/panel/locale";
 import {
   countRuleLines,
   countRuleMatchTypes,
+  countSurgeRuleLines,
+  countSurgeRuleMatchTypes,
   normalizeEtag,
 } from "$lib/panel/utils";
 
 import type {
   GeoipIndex,
   GeositeIndex,
+  PanelPlatform,
   RuleMatchCounts,
+  SurgeRuleMatchCounts,
 } from "$lib/panel/types";
+
+import { isSurgeHost } from "$lib/server/geosite-upstream";
 
 const RULES_CACHE_LIMIT = 64;
 const INDEX_REVALIDATE_INTERVAL_MS = 20_000;
@@ -29,7 +40,7 @@ type RulesCacheEntry = {
   etag: string;
   stale: boolean;
   ruleLines: string;
-  ruleTypeCounts: RuleMatchCounts;
+  ruleTypeCounts: RuleMatchCounts | null;
 };
 
 type GeoipIndexCacheEntry = {
@@ -202,8 +213,9 @@ async function maybeRevalidateGeoipIndex(fetchFn: typeof fetch): Promise<void> {
   }
 }
 
-export const load: ServerLoad = async ({ cookies, fetch }) => {
+export const load: ServerLoad = async ({ cookies, fetch, url }) => {
   const locale = getPanelLocale(cookies);
+  const platform: PanelPlatform = isSurgeHost(url.hostname) ? "surge" : "egern";
   const tr = (key: string, vars: Record<string, string | number> = {}) =>
     t(locale, key, vars);
 
@@ -215,6 +227,7 @@ export const load: ServerLoad = async ({ cookies, fetch }) => {
   let stale = "-";
   let ruleLines = "-";
   let ruleTypeCounts: RuleMatchCounts | null = null;
+  let surgeRuleTypeCounts: SurgeRuleMatchCounts | null = null;
   let rawLink = "#";
   let initError: string | null = null;
   let geoipIndex: GeoipIndex = {};
@@ -255,7 +268,10 @@ export const load: ServerLoad = async ({ cookies, fetch }) => {
       }
       index = initialIndex;
 
-      rawLink = buildRulesPublicPath(selected, null);
+      rawLink =
+        platform === "surge"
+          ? buildSurgeRulesPublicPath(selected, null, "skip")
+          : buildRulesPublicPath(selected, null);
       const rulesKey = `${currentIndex.upstreamEtag}:${selected}`;
       const cachedRules = rulesCache.get(rulesKey);
 
@@ -288,8 +304,13 @@ export const load: ServerLoad = async ({ cookies, fetch }) => {
             `${rulesResponse.status} ${rulesResponse.statusText}\n${rulesText}`.trim();
         } else {
           previewText = rulesText.length === 0 ? tr("emptyResult") : rulesText;
-          ruleLines = String(countRuleLines(rulesText));
-          ruleTypeCounts = countRuleMatchTypes(rulesText);
+          if (platform === "surge") {
+            ruleLines = String(countSurgeRuleLines(rulesText));
+            surgeRuleTypeCounts = countSurgeRuleMatchTypes(rulesText);
+          } else {
+            ruleLines = String(countRuleLines(rulesText));
+            ruleTypeCounts = countRuleMatchTypes(rulesText);
+          }
           rulesCache.set(rulesKey, {
             text: rulesText,
             etag: normalizeEtag(upstreamEtag),
@@ -324,7 +345,10 @@ export const load: ServerLoad = async ({ cookies, fetch }) => {
       geoipSelected = geoipNames[0] ?? null;
 
       if (geoipSelected) {
-        geoipRawLink = buildGeoipPublicPath(geoipSelected, false);
+        geoipRawLink =
+          platform === "surge"
+            ? buildSurgeGeoipPublicPath(geoipSelected, false)
+            : buildGeoipPublicPath(geoipSelected, false);
         const geoipRulesKey = `${currentGeoipIndex.upstreamEtag}:${geoipSelected}:nr0`;
         const cachedGeoipRules = geoipRulesCache.get(geoipRulesKey);
 
@@ -382,6 +406,7 @@ export const load: ServerLoad = async ({ cookies, fetch }) => {
 
   return {
     locale,
+    platform,
     index,
     names,
     selected,
@@ -390,10 +415,12 @@ export const load: ServerLoad = async ({ cookies, fetch }) => {
     stale,
     ruleLines,
     ruleTypeCounts,
+    surgeRuleTypeCounts,
     rawLink,
     initError,
     geoipData: {
       locale,
+      platform,
       index: geoipIndex,
       names: geoipNames,
       selected: geoipSelected,

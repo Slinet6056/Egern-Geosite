@@ -1,4 +1,6 @@
 export type PanelLocale = "zh" | "en";
+export type PanelPlatform = "egern" | "surge";
+export type SurgeRegexMode = "skip" | "standard" | "aggressive";
 
 export interface GeositeIndexItem {
   name?: string;
@@ -26,6 +28,13 @@ export interface RuleMatchCounts {
   suffix: number;
   regexp: number;
   wildcard: number;
+}
+
+export interface SurgeRuleMatchCounts {
+  domain: number;
+  suffix: number;
+  keyword: number;
+  urlRegex: number;
 }
 
 export interface RulesMeta {

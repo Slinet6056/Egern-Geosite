@@ -6,7 +6,8 @@ compatibility_date = "2026-03-02"
 workers_dev = true
 compatibility_flags = ["nodejs_compat"]
 routes = [
-  { pattern = "egern.slinet.moe", custom_domain = true }
+  { pattern = "egern.slinet.moe", custom_domain = true },
+  { pattern = "surge.slinet.moe", custom_domain = true },
 ]
 
 [assets]

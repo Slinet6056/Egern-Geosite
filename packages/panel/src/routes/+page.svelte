@@ -5,7 +5,12 @@
   import { onMount } from "svelte";
   import { Check, Copy, ExternalLink, Moon, Sun } from "@lucide/svelte";
 
-  import { buildRulesApiPath, buildRulesPublicPath } from "$lib/panel/api";
+  import {
+    buildRulesApiPath,
+    buildRulesPublicPath,
+    buildSurgeRulesApiPath,
+    buildSurgeRulesPublicPath,
+  } from "$lib/panel/api";
   import type { GeoipPanelData } from "$lib/panel/geoip-panel";
   import { SSR_INITIAL_LIST_LIMIT } from "$lib/panel/constants";
   import GeoipPanel from "$lib/panel/geoip-panel.svelte";
@@ -14,11 +19,16 @@
   import type {
     GeositeIndex,
     PanelLocale,
+    PanelPlatform,
     RuleMatchCounts,
+    SurgeRegexMode,
+    SurgeRuleMatchCounts,
   } from "$lib/panel/types";
   import {
     countRuleLines,
     countRuleMatchTypes,
+    countSurgeRuleLines,
+    countSurgeRuleMatchTypes,
     normalizeEtag,
   } from "$lib/panel/utils";
 
@@ -40,14 +50,20 @@
   import { Skeleton } from "$lib/components/ui/skeleton";
 
   const NONE_FILTER = "__none__";
-  const SITE_ORIGIN = "https://egern.slinet.moe";
   const THEME_STORAGE_KEY = "egern-panel-theme";
   const THEME_MEDIA_QUERY = "(prefers-color-scheme: dark)";
+
+  const SURGE_REGEX_MODES = [
+    { key: "skip" as SurgeRegexMode, labelKey: "regexModeSkip" },
+    { key: "standard" as SurgeRegexMode, labelKey: "regexModeStandard" },
+    { key: "aggressive" as SurgeRegexMode, labelKey: "regexModeAggressive" },
+  ] as const;
 
   type ThemePreference = "system" | "light" | "dark";
 
   interface GeositePageData {
     locale: PanelLocale;
+    platform: PanelPlatform;
     index: GeositeIndex;
     names: string[];
     selected: string | null;
@@ -56,6 +72,7 @@
     stale: string;
     ruleLines: string;
     ruleTypeCounts: RuleMatchCounts | null;
+    surgeRuleTypeCounts: SurgeRuleMatchCounts | null;
     rawLink: string;
     initError: string | null;
     geoipData: GeoipPanelData;
@@ -66,6 +83,7 @@
   export let data: GeositePageData;
 
   let locale: PanelLocale;
+  let platform: PanelPlatform;
   let index: GeositeIndex;
   let names: string[];
   let selected: string | null;
@@ -79,11 +97,13 @@
   let stale: string;
   let ruleLines: string;
   let ruleTypeCounts: RuleMatchCounts | null;
+  let surgeRuleTypeCounts: SurgeRuleMatchCounts | null;
   let rawLink: string;
   let isIndexLoading: boolean;
   let isRulesLoading: boolean;
   let initError: string | null;
   let isIndexHydrating: boolean;
+  let surgeRegexMode: SurgeRegexMode = "standard";
 
   let loadToken = 0;
   let lastQueryKey = "";
@@ -113,6 +133,7 @@
   function applyServerData(next: GeositePageData) {
     const nextLocale = next.locale as PanelLocale;
     locale = nextLocale;
+    platform = next.platform ?? "egern";
     index = next.index ?? {};
     names = next.names ?? [];
     selected = next.selected ?? null;
@@ -128,6 +149,7 @@
     stale = next.stale ?? "-";
     ruleLines = next.ruleLines ?? "-";
     ruleTypeCounts = next.ruleTypeCounts ?? null;
+    surgeRuleTypeCounts = next.surgeRuleTypeCounts ?? null;
     rawLink = next.rawLink ?? "#";
     isIndexLoading = false;
     isRulesLoading = false;
@@ -174,6 +196,17 @@
     if (!selected) {
       return [] as Array<{ key: string; label: string; href: string }>;
     }
+    if (platform === "surge") {
+      return SURGE_REGEX_MODES.map((item) => ({
+        key: item.key,
+        label: tr(item.labelKey),
+        href: buildSurgeRulesPublicPath(
+          selected as string,
+          liveFilter,
+          item.key as SurgeRegexMode,
+        ),
+      }));
+    }
     return [
       {
         key: "yaml",
@@ -193,7 +226,11 @@
   } else {
     listCount = tr("listsCount", { count: names.length });
   }
-  const canonicalUrl = `${SITE_ORIGIN}/`;
+  $: siteOrigin =
+    platform === "surge"
+      ? "https://surge.slinet.moe"
+      : "https://egern.slinet.moe";
+  $: canonicalUrl = `${siteOrigin}/`;
 
   $: if (browser) {
     if (manualDebounceTimer) {
@@ -218,6 +255,7 @@
     stale = "-";
     ruleLines = "-";
     ruleTypeCounts = null;
+    surgeRuleTypeCounts = null;
   }
 
   function resolveTheme(preference: ThemePreference): "light" | "dark" {
@@ -293,7 +331,10 @@
       return;
     }
 
-    const queryKey = `${selected}|${filter ?? ""}`;
+    const queryKey =
+      platform === "surge"
+        ? `${selected}|${filter ?? ""}|${surgeRegexMode}`
+        : `${selected}|${filter ?? ""}`;
     if (!force && queryKey === lastQueryKey) {
       return;
     }
@@ -303,11 +344,24 @@
     isRulesLoading = true;
     previewText = tr("loading");
     resetMeta();
-    rawLink = buildRulesPublicPath(selected, filter);
+
+    const apiPath =
+      platform === "surge"
+        ? buildSurgeRulesApiPath(selected, filter, surgeRegexMode)
+        : buildRulesApiPath(selected, filter);
+    rawLink =
+      platform === "surge"
+        ? buildSurgeRulesPublicPath(selected, filter, surgeRegexMode)
+        : buildRulesPublicPath(selected, filter);
 
     try {
-      const response = await fetch(buildRulesApiPath(selected, filter), {
-        headers: { accept: "application/yaml, text/plain;q=0.8, */*;q=0.1" },
+      const response = await fetch(apiPath, {
+        headers: {
+          accept:
+            platform === "surge"
+              ? "text/plain;q=1, */*;q=0.1"
+              : "application/yaml, text/plain;q=0.8, */*;q=0.1",
+        },
       });
       const body = await response.text();
 
@@ -326,8 +380,13 @@
       }
 
       previewText = body.length === 0 ? tr("emptyResult") : body;
-      ruleLines = String(countRuleLines(body));
-      ruleTypeCounts = countRuleMatchTypes(body);
+      if (platform === "surge") {
+        ruleLines = String(countSurgeRuleLines(body));
+        surgeRuleTypeCounts = countSurgeRuleMatchTypes(body);
+      } else {
+        ruleLines = String(countRuleLines(body));
+        ruleTypeCounts = countRuleMatchTypes(body);
+      }
     } catch (error) {
       if (token !== loadToken) {
         return;
@@ -446,6 +505,13 @@
     previewText = tr("filterInputLoading");
   }
 
+  function onSurgeRegexModeChange(mode: SurgeRegexMode) {
+    if (mode === surgeRegexMode) return;
+    surgeRegexMode = mode;
+    previewText = tr("regexModeSwitchLoading");
+    lastQueryKey = "";
+  }
+
   function toClipboardUrl(href: string): string {
     try {
       return new URL(href, window.location.origin).toString();
@@ -516,12 +582,20 @@
 </script>
 
 <svelte:head>
-  <title>Egern Geosite Panel</title>
+  <title
+    >{platform === "surge"
+      ? "Surge Geosite Panel"
+      : "Egern Geosite Panel"}</title
+  >
   <meta
     name="description"
     content={locale === "zh"
-      ? "Egern Geosite 面板：按数据集和标签生成可直接使用的规则集。"
-      : "Egern Geosite panel for generating ready-to-use rule sets by dataset and filter."}
+      ? platform === "surge"
+        ? "Surge Geosite 面板：按数据集和标签生成可直接使用的规则集。"
+        : "Egern Geosite 面板：按数据集和标签生成可直接使用的规则集。"
+      : platform === "surge"
+        ? "Surge Geosite panel for generating ready-to-use rule sets by dataset and filter."
+        : "Egern Geosite panel for generating ready-to-use rule sets by dataset and filter."}
   />
   <link rel="canonical" href={canonicalUrl} />
 </svelte:head>
@@ -536,15 +610,31 @@
       >
         <div class="space-y-1">
           <p class="text-primary text-xs font-semibold tracking-[0.2em]">
-            {activeView === "geoip" ? "EGERN GEOIP" : "EGERN GEOSITE"}
+            {#if platform === "surge"}
+              {activeView === "geoip" ? "SURGE GEOIP" : "SURGE GEOSITE"}
+            {:else}
+              {activeView === "geoip" ? "EGERN GEOIP" : "EGERN GEOSITE"}
+            {/if}
           </p>
           <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">
-            {activeView === "geoip" ? tr("geoipAppTitle") : tr("appTitle")}
+            {#if platform === "surge"}
+              {activeView === "geoip"
+                ? tr("surgeGeoipAppTitle")
+                : tr("surgeAppTitle")}
+            {:else}
+              {activeView === "geoip" ? tr("geoipAppTitle") : tr("appTitle")}
+            {/if}
           </h1>
           <p class="text-muted-foreground text-sm">
-            {activeView === "geoip"
-              ? tr("geoipAppSubTitle")
-              : tr("appSubTitle")}
+            {#if platform === "surge"}
+              {activeView === "geoip"
+                ? tr("surgeGeoipAppSubTitle")
+                : tr("surgeAppSubTitle")}
+            {:else}
+              {activeView === "geoip"
+                ? tr("geoipAppSubTitle")
+                : tr("appSubTitle")}
+            {/if}
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -682,6 +772,29 @@
                 {selectedInfo?.name ?? selected ?? "-"}
               </h2>
             </div>
+
+            {#if platform === "surge"}
+              <div class="flex items-center gap-2">
+                <span class="text-muted-foreground text-xs font-semibold"
+                  >{tr("regexMode")}</span
+                >
+                <div class="inline-flex overflow-hidden rounded-md border">
+                  {#each SURGE_REGEX_MODES as item}
+                    <Button
+                      type="button"
+                      variant={surgeRegexMode === item.key
+                        ? "default"
+                        : "ghost"}
+                      size="sm"
+                      class="rounded-none border-r last:border-r-0"
+                      onclick={() => onSurgeRegexModeChange(item.key)}
+                    >
+                      {tr(item.labelKey)}
+                    </Button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
           </div>
 
           <div class="grid gap-4 lg:grid-cols-[1fr_17rem]">
@@ -800,35 +913,70 @@
                     <span class="font-mono">{availableFilters.length}</span>
                   </p>
                 {/if}
-                {#if (ruleTypeCounts?.exact ?? 0) > 0}
-                  <p>
-                    <span>{tr("exactMatchRules")} </span>
-                    <span class="font-mono">{ruleTypeCounts?.exact}</span>
-                  </p>
-                {/if}
-                {#if (ruleTypeCounts?.keyword ?? 0) > 0}
-                  <p>
-                    <span>{tr("keywordMatchRules")} </span>
-                    <span class="font-mono">{ruleTypeCounts?.keyword}</span>
-                  </p>
-                {/if}
-                {#if (ruleTypeCounts?.suffix ?? 0) > 0}
-                  <p>
-                    <span>{tr("suffixMatchRules")} </span>
-                    <span class="font-mono">{ruleTypeCounts?.suffix}</span>
-                  </p>
-                {/if}
-                {#if (ruleTypeCounts?.regexp ?? 0) > 0}
-                  <p>
-                    <span>{tr("regexMatchRules")} </span>
-                    <span class="font-mono">{ruleTypeCounts?.regexp}</span>
-                  </p>
-                {/if}
-                {#if (ruleTypeCounts?.wildcard ?? 0) > 0}
-                  <p>
-                    <span>{tr("wildcardMatchRules")} </span>
-                    <span class="font-mono">{ruleTypeCounts?.wildcard}</span>
-                  </p>
+                {#if platform === "surge"}
+                  {#if (surgeRuleTypeCounts?.domain ?? 0) > 0}
+                    <p>
+                      <span>{tr("domainMatchRules")} </span>
+                      <span class="font-mono"
+                        >{surgeRuleTypeCounts?.domain}</span
+                      >
+                    </p>
+                  {/if}
+                  {#if (surgeRuleTypeCounts?.keyword ?? 0) > 0}
+                    <p>
+                      <span>{tr("keywordMatchRules")} </span>
+                      <span class="font-mono"
+                        >{surgeRuleTypeCounts?.keyword}</span
+                      >
+                    </p>
+                  {/if}
+                  {#if (surgeRuleTypeCounts?.suffix ?? 0) > 0}
+                    <p>
+                      <span>{tr("suffixMatchRules")} </span>
+                      <span class="font-mono"
+                        >{surgeRuleTypeCounts?.suffix}</span
+                      >
+                    </p>
+                  {/if}
+                  {#if (surgeRuleTypeCounts?.urlRegex ?? 0) > 0}
+                    <p>
+                      <span>{tr("urlRegexMatchRules")} </span>
+                      <span class="font-mono"
+                        >{surgeRuleTypeCounts?.urlRegex}</span
+                      >
+                    </p>
+                  {/if}
+                {:else}
+                  {#if (ruleTypeCounts?.exact ?? 0) > 0}
+                    <p>
+                      <span>{tr("exactMatchRules")} </span>
+                      <span class="font-mono">{ruleTypeCounts?.exact}</span>
+                    </p>
+                  {/if}
+                  {#if (ruleTypeCounts?.keyword ?? 0) > 0}
+                    <p>
+                      <span>{tr("keywordMatchRules")} </span>
+                      <span class="font-mono">{ruleTypeCounts?.keyword}</span>
+                    </p>
+                  {/if}
+                  {#if (ruleTypeCounts?.suffix ?? 0) > 0}
+                    <p>
+                      <span>{tr("suffixMatchRules")} </span>
+                      <span class="font-mono">{ruleTypeCounts?.suffix}</span>
+                    </p>
+                  {/if}
+                  {#if (ruleTypeCounts?.regexp ?? 0) > 0}
+                    <p>
+                      <span>{tr("regexMatchRules")} </span>
+                      <span class="font-mono">{ruleTypeCounts?.regexp}</span>
+                    </p>
+                  {/if}
+                  {#if (ruleTypeCounts?.wildcard ?? 0) > 0}
+                    <p>
+                      <span>{tr("wildcardMatchRules")} </span>
+                      <span class="font-mono">{ruleTypeCounts?.wildcard}</span>
+                    </p>
+                  {/if}
                 {/if}
               </div>
             </section>

@@ -4,10 +4,18 @@
   import { browser } from "$app/environment";
   import { Check, Copy, ExternalLink } from "@lucide/svelte";
 
-  import { buildGeoipApiPath, buildGeoipPublicPath } from "$lib/panel/api";
+  import {
+    buildGeoipApiPath,
+    buildGeoipPublicPath,
+    buildSurgeGeoipPublicPath,
+  } from "$lib/panel/api";
   import { t } from "$lib/panel/i18n";
   import type { GeoipPanelData } from "$lib/panel/geoip-panel";
-  import type { GeoipIndex, PanelLocale } from "$lib/panel/types";
+  import type {
+    GeoipIndex,
+    PanelLocale,
+    PanelPlatform,
+  } from "$lib/panel/types";
   import { countRuleLines, normalizeEtag } from "$lib/panel/utils";
 
   import {
@@ -35,6 +43,7 @@
   export let data: GeoipPanelData;
 
   let locale: PanelLocale;
+  let platform: PanelPlatform;
   let index: GeoipIndex;
   let names: string[];
   let selected: string | null;
@@ -65,6 +74,7 @@
   function applyServerData(next: GeoipPanelData) {
     const nextLocale = next.locale;
     locale = nextLocale;
+    platform = next.platform ?? "egern";
     index = next.index ?? {};
     names = next.names ?? [];
     selected = next.selected ?? null;
@@ -101,10 +111,12 @@
     }
 
     const selectedName = selected;
+    const pathFn =
+      platform === "surge" ? buildSurgeGeoipPublicPath : buildGeoipPublicPath;
 
     return GEOIP_MODES.map((item) => ({
       mode: item.key,
-      href: buildGeoipPublicPath(selectedName, item.noResolve),
+      href: pathFn(selectedName, item.noResolve),
     }));
   })();
   $: modeLabel = noResolve ? tr("geoipModeNoResolve") : tr("geoipModeResolve");

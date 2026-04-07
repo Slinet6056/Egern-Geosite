@@ -4,4 +4,6 @@ export * from "./parser.js";
 export * from "./pipeline.js";
 export * from "./resolver.js";
 export * from "./stats.js";
+export * from "./surge.js";
+export * from "./surge-regex.js";
 export * from "./types.js";

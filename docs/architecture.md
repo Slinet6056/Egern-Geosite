@@ -1,23 +1,26 @@
-# Egern Geosite Architecture
+# Egern Geosite / Surge Geosite Architecture
 
 This document keeps the technical runtime/ops details for maintainers and contributors.
 
 ## Runtime Topology
 
-Production uses two Cloudflare Workers on the same domain:
+Production uses two Cloudflare Workers on the same account:
 
 - API Worker (`packages/worker`)
-  - Serves `/geosite*` and `/geoip*`
+  - Serves `/geosite*`, `/geoip*`, `/surge/geosite*`, `/surge/geoip*`
   - Runs scheduled upstream refresh
 - Panel Worker (`packages/panel`)
-  - Serves dashboard pages (`/`, `/zh`, `/en`, etc.)
-  - Proxies panel-side API calls to geosite endpoints
+  - Serves dashboard pages for both `egern.slinet.moe` and `surge.slinet.moe`
+  - Detects hostname at SSR time; renders Egern UI or Surge UI accordingly
+  - Proxies panel-side API calls to the API Worker via service binding
+  - Rewrites proxy paths: `surge.slinet.moe/geosite/*` → `/surge/geosite/*` on the API Worker
 
-Recommended route priority:
+Route priority:
 
-1. `egern.slinet.moe/geosite*` -> API Worker
-2. `egern.slinet.moe/geoip*` -> API Worker
-3. `egern.slinet.moe` (Custom Domain) -> Panel Worker
+1. `egern.slinet.moe/geosite*` → API Worker
+2. `egern.slinet.moe/geoip*` → API Worker
+3. `egern.slinet.moe` (Custom Domain) → Panel Worker
+4. `surge.slinet.moe` (Custom Domain) → Panel Worker
 
 ## Refresh Pipeline
 
@@ -36,14 +39,16 @@ Recommended route priority:
 ## Serve Pipeline
 
 1. Read `state/latest.json`.
-2. Try `artifacts/{etag}/geosite/{name[@filter]}.yaml` (`geosite`) or `artifacts/{etag}/geoip/{country}.yaml` (`geoip`).
+2. Try artifact cache in R2.
 3. If hit: return immediately.
 4. If miss:
-   - Optionally return stale geosite artifact from previous ETag (non-filter path), then rebuild latest in background.
+   - Optionally return stale artifact from previous ETag (non-filter path), then rebuild latest in background.
    - GeoIP only serves stale artifacts after the current `geoipSnapshot` exists; while a new ETag is still pending finalize, `/geoip*` returns `503`.
    - Otherwise build on demand and write artifact.
 
 ## API Surface
+
+### Egern (`egern.slinet.moe`)
 
 - `GET /geosite`
 - `GET /geosite/:name_with_filter` or `GET /geosite/:name_with_filter.yaml`
@@ -52,12 +57,22 @@ Recommended route priority:
 - `GET /geoip/:country_code` or `GET /geoip/:country_code.yaml`
 - `GET /geoip/:country_code?no_resolve=true` (adds `no_resolve: true` at top of ruleset output)
 
-`name_with_filter` format:
+Geosite output is mode-less and emits upstream regexp entries as `domain_regex_set`.
 
-- `apple` => full converted list
-- `apple@cn` => only rules tagged with `@cn`
+### Surge (`surge.slinet.moe`, served via Panel → API Worker `/surge/*`)
 
-Geosite output is now mode-less and emits upstream regexp entries as `domain_regex_set`.
+- `GET /geosite` (Panel proxy → `/surge/geosite`)
+- `GET /geosite/:name_with_filter.list?regex_mode=skip|standard|aggressive`
+- `GET /geoip` (Panel proxy → `/surge/geoip`)
+- `GET /geoip/:country_code.list?no_resolve=true`
+
+Surge geosite response headers: `x-surge-regex-mode`, `x-surge-regex-total`, `x-surge-regex-converted`, `x-surge-regex-skipped`.
+
+`regex_mode` controls how V2Ray `regexp:` entries (which match domain names) are converted to Surge `URL-REGEX` (which matches full URLs):
+
+- `skip`: drop all regexp entries
+- `standard` (default): only converts entries matching recognized structures — exact domain (`^x$`), optional-subdomain suffix (`(^|\.)x$`), forced-subdomain suffix (`\.x$`), domain prefix (`^x`); drops entries with lookaheads, backreferences, slashes, or top-level alternation
+- `aggressive`: converts all entries by stripping anchors and wrapping with `^https?://…/`; nothing is dropped, but results may be over-broad or imprecise
 
 ## R2 Storage Layout
 
@@ -69,6 +84,8 @@ Geosite output is now mode-less and emits upstream regexp entries as `domain_reg
 - `snapshots/{etag}/geoip/sources.json.gz`
 - `snapshots/{etag}/geoip/index.json`
 - `artifacts/{etag}/geoip/{country}.yaml`
+- `artifacts/{etag}/surge/geosite/{name[@filter]}@{regexMode}.list`
+- `artifacts/{etag}/surge/geoip/{country}.list`
 
 ## Operations
 

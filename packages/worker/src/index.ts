@@ -1,9 +1,11 @@
 import {
   emitEgernRuleset,
+  emitSurgeRuleset,
   parseListsFromText,
   resolveAllLists,
   type DomainRule,
   type ResolvedList,
+  type SurgeRegexMode,
 } from "@egern-geosite/core";
 import { gunzipSync, gzipSync, strFromU8, strToU8, unzipSync } from "fflate";
 
@@ -22,6 +24,11 @@ const geoipSnapshotCache = new Map<string, Promise<GeoipSnapshotPayload>>();
 const resolvedCache = new Map<string, Promise<Record<string, ResolvedList>>>();
 const artifactBuildLocks = new Map<string, Promise<ArtifactBuildResult>>();
 const geoipArtifactBuildLocks = new Map<
+  string,
+  Promise<GeoipArtifactBuildResult>
+>();
+const surgeArtifactBuildLocks = new Map<string, Promise<ArtifactBuildResult>>();
+const surgeGeoipArtifactBuildLocks = new Map<
   string,
   Promise<GeoipArtifactBuildResult>
 >();
@@ -546,6 +553,54 @@ async function handleFetch(
     );
   }
 
+  // Surge routes
+  if (path === "/surge/geosite") {
+    return handleSurgeGeositeIndex(request, env, ctx);
+  }
+
+  if (path === "/surge/geoip") {
+    return handleSurgeGeoipIndex(request, env, ctx);
+  }
+
+  if (path.startsWith("/surge/geoip/")) {
+    const suffix = path.slice("/surge/geoip/".length);
+    const decoded = safeDecodeURIComponent(suffix);
+    if (decoded === null) {
+      return text(400, "invalid path encoding");
+    }
+
+    const noResolve = parseBooleanQueryFlag(url, "no_resolve");
+    return handleSurgeGeoipRules(
+      request,
+      stripOptionalSuffix(decoded, ".list"),
+      noResolve,
+      env,
+      ctx,
+    );
+  }
+
+  if (path.startsWith("/surge/geosite/")) {
+    const suffix = path.slice("/surge/geosite/".length);
+    const segments = suffix.split("/").filter((item) => item.length > 0);
+    if (segments.length === 0) {
+      return text(404, "not found");
+    }
+
+    const decoded = safeDecodeURIComponent(segments.join("/"));
+    if (decoded === null) {
+      return text(400, "invalid path encoding");
+    }
+
+    const regexMode = parseSurgeRegexMode(url);
+    return handleSurgeGeositeRules(
+      request,
+      stripOptionalSuffix(decoded, ".list"),
+      regexMode,
+      env,
+      ctx,
+    );
+  }
+
   if (env.ASSETS) {
     return env.ASSETS.fetch(request);
   }
@@ -815,6 +870,270 @@ async function handleGeoipRules(
   return text(200, output, headers);
 }
 
+// --- Surge handlers ---
+
+const VALID_SURGE_REGEX_MODES = new Set<SurgeRegexMode>([
+  "skip",
+  "standard",
+  "aggressive",
+]);
+
+function parseSurgeRegexMode(url: URL): SurgeRegexMode {
+  const raw = url.searchParams.get("regex_mode");
+  if (!raw) return "standard";
+  const normalized = raw.trim().toLowerCase();
+  if (VALID_SURGE_REGEX_MODES.has(normalized as SurgeRegexMode)) {
+    return normalized as SurgeRegexMode;
+  }
+  return "skip";
+}
+
+async function handleSurgeGeositeIndex(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContextLike,
+): Promise<Response> {
+  // Surge geosite index reuses the same data as Egern
+  return handleGeositeIndex(request, env, ctx);
+}
+
+async function handleSurgeGeoipIndex(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContextLike,
+): Promise<Response> {
+  return handleGeoipIndex(request, env, ctx);
+}
+
+async function handleSurgeGeositeRules(
+  request: Request,
+  nameWithFilter: string,
+  regexMode: SurgeRegexMode,
+  env: WorkerEnv,
+  ctx: ExecutionContextLike,
+): Promise<Response> {
+  const { name, filter } = splitNameFilter(nameWithFilter);
+  if (!isValidListName(name) || (filter !== null && !isValidAttr(filter))) {
+    return text(400, "invalid name");
+  }
+
+  const latest = await ensureLatestState(env);
+  if (!latest) {
+    return text(503, "geosite data not ready");
+  }
+
+  const latestKey = surgeGeositeArtifactKey(
+    latest.upstream.etag,
+    name,
+    filter,
+    regexMode,
+  );
+  const latestArtifact = await readText(env.GEOSITE_BUCKET, latestKey);
+  if (latestArtifact !== null) {
+    const responseEtag = buildSurgeRulesEtag(
+      latest.upstream.etag,
+      name,
+      filter,
+      regexMode,
+    );
+    const headers = surgeGeositeResponseHeaders(
+      latest.upstream.etag,
+      name,
+      filter,
+      regexMode,
+      false,
+    );
+    if (
+      matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)
+    ) {
+      return notModified(headers);
+    }
+    return text(200, latestArtifact, headers);
+  }
+
+  const index = await readJson<GeositeIndex>(
+    env.GEOSITE_BUCKET,
+    latest.snapshot.indexKey,
+  );
+  if (index && !index[name]) {
+    return text(404, `list not found: ${name}`);
+  }
+
+  const compilePromise = ensureSurgeArtifactForLatest(
+    env,
+    latest,
+    name,
+    filter,
+    regexMode,
+  );
+
+  if (!filter && latest.previousEtag && index && index[name]) {
+    const staleKey = surgeGeositeArtifactKey(
+      latest.previousEtag,
+      name,
+      filter,
+      regexMode,
+    );
+    const staleArtifact = await readText(env.GEOSITE_BUCKET, staleKey);
+    if (staleArtifact !== null) {
+      const responseEtag = buildSurgeRulesEtag(
+        latest.previousEtag,
+        name,
+        filter,
+        regexMode,
+      );
+      const headers = surgeGeositeResponseHeaders(
+        latest.previousEtag,
+        name,
+        filter,
+        regexMode,
+        true,
+      );
+      ctx.waitUntil(
+        compilePromise.then(() => undefined).catch(() => undefined),
+      );
+
+      if (
+        matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)
+      ) {
+        return notModified(headers);
+      }
+      return text(200, staleArtifact, headers);
+    }
+  }
+
+  const build = await compilePromise;
+  if (!build.listFound) {
+    return text(404, `list not found: ${name}`);
+  }
+
+  const responseEtag = buildSurgeRulesEtag(
+    latest.upstream.etag,
+    name,
+    filter,
+    regexMode,
+  );
+  const headers = surgeGeositeResponseHeaders(
+    latest.upstream.etag,
+    name,
+    filter,
+    regexMode,
+    false,
+  );
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
+    return notModified(headers);
+  }
+  return text(200, build.output, headers);
+}
+
+async function handleSurgeGeoipRules(
+  request: Request,
+  nameRaw: string,
+  noResolve: boolean,
+  env: WorkerEnv,
+  ctx: ExecutionContextLike,
+): Promise<Response> {
+  const name = nameRaw.trim().toLowerCase();
+  if (!isValidListName(name)) {
+    return text(400, "invalid name");
+  }
+
+  const latest = await ensureLatestState(env);
+  if (!latest || !latest.geoipSnapshot) {
+    return text(503, "geoip data not ready");
+  }
+
+  const latestKey = surgeGeoipArtifactKey(latest.upstream.etag, name);
+  const latestArtifact = await readText(env.GEOSITE_BUCKET, latestKey);
+  if (latestArtifact !== null) {
+    const responseEtag = buildSurgeGeoipRulesEtag(
+      latest.upstream.etag,
+      name,
+      noResolve,
+    );
+    const headers = surgeGeoipResponseHeaders(
+      latest.upstream.etag,
+      name,
+      false,
+      noResolve,
+    );
+    if (
+      matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)
+    ) {
+      return notModified(headers);
+    }
+    const output = noResolve
+      ? withSurgeNoResolve(latestArtifact)
+      : latestArtifact;
+    return text(200, output, headers);
+  }
+
+  const index = await readJson<GeoipIndex>(
+    env.GEOSITE_BUCKET,
+    latest.geoipSnapshot.indexKey,
+  );
+  if (index && !index[name]) {
+    return text(404, `list not found: ${name}`);
+  }
+
+  const compilePromise = ensureSurgeGeoipArtifactForLatest(env, latest, name);
+
+  if (latest.previousEtag && index && index[name]) {
+    const staleKey = surgeGeoipArtifactKey(latest.previousEtag, name);
+    const staleArtifact = await readText(env.GEOSITE_BUCKET, staleKey);
+    if (staleArtifact !== null) {
+      const responseEtag = buildSurgeGeoipRulesEtag(
+        latest.previousEtag,
+        name,
+        noResolve,
+      );
+      const headers = surgeGeoipResponseHeaders(
+        latest.previousEtag,
+        name,
+        true,
+        noResolve,
+      );
+      ctx.waitUntil(
+        compilePromise.then(() => undefined).catch(() => undefined),
+      );
+
+      if (
+        matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)
+      ) {
+        return notModified(headers);
+      }
+
+      const output = noResolve
+        ? withSurgeNoResolve(staleArtifact)
+        : staleArtifact;
+      return text(200, output, headers);
+    }
+  }
+
+  const build = await compilePromise;
+  if (!build.listFound) {
+    return text(404, `list not found: ${name}`);
+  }
+
+  const responseEtag = buildSurgeGeoipRulesEtag(
+    latest.upstream.etag,
+    name,
+    noResolve,
+  );
+  const headers = surgeGeoipResponseHeaders(
+    latest.upstream.etag,
+    name,
+    false,
+    noResolve,
+  );
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), responseEtag)) {
+    return notModified(headers);
+  }
+
+  const output = noResolve ? withSurgeNoResolve(build.output) : build.output;
+  return text(200, output, headers);
+}
+
 function splitNameFilter(input: string): {
   name: string;
   filter: string | null;
@@ -1055,6 +1374,237 @@ async function ensureGeoipArtifactForLatest(
 
   geoipArtifactBuildLocks.set(lockKey, lock);
   return lock;
+}
+
+// --- Surge artifact builders ---
+
+async function ensureSurgeArtifactForLatest(
+  env: WorkerEnv,
+  latest: LatestState,
+  name: string,
+  filter: string | null,
+  regexMode: SurgeRegexMode,
+): Promise<ArtifactBuildResult> {
+  const lockKey = `surge:${latest.upstream.etag}:${artifactName(name, filter)}:${regexMode}`;
+  const existingLock = surgeArtifactBuildLocks.get(lockKey);
+  if (existingLock) {
+    return existingLock;
+  }
+
+  const lock = (async () => {
+    const outputKey = surgeGeositeArtifactKey(
+      latest.upstream.etag,
+      name,
+      filter,
+      regexMode,
+    );
+    const existing = await readText(env.GEOSITE_BUCKET, outputKey);
+    if (existing !== null) {
+      return {
+        listFound: true,
+        output: existing,
+        availableFilters: [],
+      };
+    }
+
+    const resolved = await loadResolvedLists(env, latest);
+    const target = resolved[name.toUpperCase()];
+    if (!target) {
+      return {
+        listFound: false,
+        output: "",
+        availableFilters: [],
+      };
+    }
+
+    const availableFilters = collectFilters(target.entries);
+    if (filter && !availableFilters.includes(filter)) {
+      return {
+        listFound: true,
+        output: "",
+        availableFilters,
+      };
+    }
+
+    const entries = filter
+      ? target.entries.filter((entry) => entry.attrs.includes(filter))
+      : target.entries;
+
+    const emitted = emitSurgeRuleset(
+      { name: target.name, entries },
+      { regexMode },
+    );
+
+    const output = emitted.text.length > 0 ? `${emitted.text}\n` : "";
+    await writeText(env.GEOSITE_BUCKET, outputKey, output, {
+      contentType: "text/plain; charset=utf-8",
+      cacheControl: "public, max-age=31536000, immutable",
+    });
+    return {
+      listFound: true,
+      output,
+      availableFilters,
+    };
+  })().finally(() => {
+    surgeArtifactBuildLocks.delete(lockKey);
+  });
+
+  surgeArtifactBuildLocks.set(lockKey, lock);
+  return lock;
+}
+
+async function ensureSurgeGeoipArtifactForLatest(
+  env: WorkerEnv,
+  latest: LatestState,
+  name: string,
+): Promise<GeoipArtifactBuildResult> {
+  const lockKey = `surge-geoip:${latest.upstream.etag}:${name}`;
+  const existingLock = surgeGeoipArtifactBuildLocks.get(lockKey);
+  if (existingLock) {
+    return existingLock;
+  }
+
+  const lock = (async () => {
+    const outputKey = surgeGeoipArtifactKey(latest.upstream.etag, name);
+    const existing = await readText(env.GEOSITE_BUCKET, outputKey);
+    if (existing !== null) {
+      return {
+        listFound: true,
+        output: existing,
+      };
+    }
+
+    const snapshot = await loadGeoipSnapshotPayload(env, latest);
+    const target = snapshot.lists[name];
+    if (!target) {
+      return {
+        listFound: false,
+        output: "",
+      };
+    }
+
+    const output = emitSurgeGeoipRuleset(target);
+    await writeText(env.GEOSITE_BUCKET, outputKey, output, {
+      contentType: "text/plain; charset=utf-8",
+      cacheControl: "public, max-age=31536000, immutable",
+    });
+
+    return {
+      listFound: true,
+      output,
+    };
+  })().finally(() => {
+    surgeGeoipArtifactBuildLocks.delete(lockKey);
+  });
+
+  surgeGeoipArtifactBuildLocks.set(lockKey, lock);
+  return lock;
+}
+
+function emitSurgeGeoipRuleset(list: GeoipListPayload): string {
+  const lines: string[] = [];
+
+  for (const cidr of list.ipv4Cidrs) {
+    lines.push(`IP-CIDR,${cidr}`);
+  }
+
+  for (const cidr of list.ipv6Cidrs) {
+    lines.push(`IP-CIDR6,${cidr}`);
+  }
+
+  return lines.length > 0 ? `${lines.join("\n")}\n` : "";
+}
+
+function withSurgeNoResolve(content: string): string {
+  // 为每行规则追加 ,no-resolve
+  return content
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (
+        trimmed.length === 0 ||
+        trimmed.startsWith("#") ||
+        trimmed.startsWith("//")
+      ) {
+        return line;
+      }
+      return `${line},no-resolve`;
+    })
+    .join("\n");
+}
+
+function surgeGeositeArtifactKey(
+  etag: string,
+  name: string,
+  filter: string | null,
+  regexMode: SurgeRegexMode,
+): string {
+  return `artifacts/${etag}/surge/geosite/${artifactName(name, filter)}@${regexMode}.list`;
+}
+
+function surgeGeoipArtifactKey(etag: string, name: string): string {
+  return `artifacts/${etag}/surge/geoip/${name.toLowerCase()}.list`;
+}
+
+function buildSurgeRulesEtag(
+  upstreamEtag: string,
+  name: string,
+  filter: string | null,
+  regexMode: SurgeRegexMode,
+): string {
+  return `"${upstreamEtag}:surge:${name.toLowerCase()}${filter ? `@${filter}` : ""}:${regexMode}"`;
+}
+
+function buildSurgeGeoipRulesEtag(
+  upstreamEtag: string,
+  name: string,
+  noResolve: boolean,
+): string {
+  return `"${upstreamEtag}:surge-geoip:${name.toLowerCase()}:nr${noResolve ? "1" : "0"}"`;
+}
+
+function surgeGeositeResponseHeaders(
+  etag: string,
+  name: string,
+  filter: string | null,
+  regexMode: SurgeRegexMode,
+  stale: boolean,
+): Record<string, string> {
+  const responseEtag = buildSurgeRulesEtag(etag, name, filter, regexMode);
+  const fileName = `${artifactName(name, filter)}.list`;
+  return {
+    "content-type": "text/plain; charset=utf-8",
+    "content-disposition": `inline; filename="${fileName}"`,
+    "cache-control": stale
+      ? "public, max-age=60, s-maxage=120, stale-while-revalidate=900"
+      : "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
+    etag: responseEtag,
+    "x-upstream-etag": etag,
+    "x-list": name.toLowerCase(),
+    "x-surge-regex-mode": regexMode,
+    ...(filter ? { "x-filter": filter } : {}),
+    ...(stale ? { "x-stale": "1" } : {}),
+  };
+}
+
+function surgeGeoipResponseHeaders(
+  etag: string,
+  name: string,
+  stale: boolean,
+  noResolve: boolean,
+): Record<string, string> {
+  return {
+    "content-type": "text/plain; charset=utf-8",
+    "content-disposition": `inline; filename="${name.toLowerCase()}.list"`,
+    "cache-control": stale
+      ? "public, max-age=60, s-maxage=120, stale-while-revalidate=900"
+      : "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
+    etag: buildSurgeGeoipRulesEtag(etag, name, noResolve),
+    "x-upstream-etag": etag,
+    "x-list": name.toLowerCase(),
+    ...(noResolve ? { "x-no-resolve": "1" } : {}),
+    ...(stale ? { "x-stale": "1" } : {}),
+  };
 }
 
 async function loadResolvedLists(

@@ -102,3 +102,39 @@ export interface GlobalStats {
   resolved: ResolvedCounts;
   output: OutputStats;
 }
+
+// Surge types
+
+export type SurgeRuleType =
+  | "DOMAIN"
+  | "DOMAIN-SUFFIX"
+  | "DOMAIN-KEYWORD"
+  | "URL-REGEX";
+
+export type SurgeRegexMode = "skip" | "standard" | "aggressive";
+
+export interface SurgeRule {
+  type: SurgeRuleType;
+  value: string;
+  source: SourceLocation;
+}
+
+export interface SurgeEmitReport {
+  regex: {
+    total: number;
+    converted: number;
+    skipped: number;
+  };
+}
+
+export interface EmitSurgeOptions {
+  dedupe?: boolean;
+  regexMode?: SurgeRegexMode;
+}
+
+export interface EmitSurgeResult {
+  lines: string[];
+  text: string;
+  rules: SurgeRule[];
+  report: SurgeEmitReport;
+}

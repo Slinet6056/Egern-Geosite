@@ -65,6 +65,21 @@ const messages = {
     themeDark: "深色",
     themeSystem: "跟随系统",
     themeToggleAria: "切换主题，当前：{mode}",
+    // Surge
+    surgeAppTitle: "Surge Geosite",
+    surgeAppSubTitle:
+      "把上游 geosite 数据集转换为 Surge 可用规则集，开箱即用。",
+    surgeGeoipAppTitle: "Surge GeoIP",
+    surgeGeoipAppSubTitle:
+      "把上游 geoip 数据集转换为 Surge 可用规则集，开箱即用。",
+    regexMode: "正则转换:",
+    regexModeSkip: "跳过",
+    regexModeStandard: "标准",
+    regexModeAggressive: "激进",
+    regexConverted: "已转换 {converted} / {total} 条，跳过 {skipped} 条",
+    urlRegexMatchRules: "正则匹配:",
+    domainMatchRules: "精确匹配:",
+    regexModeSwitchLoading: "正则模式已切换，正在加载…",
   },
   en: {
     appTitle: "Egern Geosite",
@@ -133,6 +148,21 @@ const messages = {
     themeDark: "Dark",
     themeSystem: "System",
     themeToggleAria: "Switch theme, current: {mode}",
+    // Surge
+    surgeAppTitle: "Surge Geosite",
+    surgeAppSubTitle:
+      "Geosite datasets, converted into ready-to-use Surge rule sets.",
+    surgeGeoipAppTitle: "Surge GeoIP",
+    surgeGeoipAppSubTitle:
+      "GeoIP datasets, converted into ready-to-use Surge rule sets.",
+    regexMode: "regex mode:",
+    regexModeSkip: "skip",
+    regexModeStandard: "standard",
+    regexModeAggressive: "aggressive",
+    regexConverted: "{converted} / {total} converted, {skipped} skipped",
+    urlRegexMatchRules: "regex match:",
+    domainMatchRules: "exact match:",
+    regexModeSwitchLoading: "Regex mode changed, loading...",
   },
 } as const;
 

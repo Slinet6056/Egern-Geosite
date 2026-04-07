@@ -1365,3 +1365,237 @@ describe("worker fetch routes", () => {
     expect(await response.text()).toContain("panel");
   });
 });
+
+describe("surge routes", () => {
+  async function setupSurgeState(bucket: MemoryR2Bucket): Promise<void> {
+    await bucket.putJson("state/latest.json", {
+      upstream: {
+        zipUrl: "https://example.com/master.zip",
+        etag: "etag-surge-v1",
+      },
+      snapshot: {
+        sourceKey: "snapshots/etag-surge-v1/geosite/sources.json.gz",
+        indexKey: "snapshots/etag-surge-v1/geosite/index.json",
+        listCount: 1,
+        generatedAt: "2026-02-15T00:00:00.000Z",
+      },
+      geoipSnapshot: {
+        sourceKey: "snapshots/etag-surge-v1/geoip/sources.json.gz",
+        indexKey: "snapshots/etag-surge-v1/geoip/index.json",
+        listCount: 1,
+        generatedAt: "2026-02-15T00:00:00.000Z",
+      },
+      previousEtag: null,
+      checkedAt: "2026-02-15T00:00:00.000Z",
+    });
+
+    await bucket.put(
+      "snapshots/etag-surge-v1/geosite/sources.json.gz",
+      makeSnapshotPayload("etag-surge-v1", {
+        google:
+          "domain:google.com\nfull:api.example.net\nkeyword:googlevideo\nregexp:(^|\\.)youtube\\.com$\n",
+      }),
+    );
+    await bucket.putJson("snapshots/etag-surge-v1/geosite/index.json", {
+      google: {
+        name: "GOOGLE",
+        sourceFile: "google",
+        filters: [],
+        path: "rules/google.yaml",
+      },
+    });
+
+    await bucket.put(
+      "snapshots/etag-surge-v1/geoip/sources.json.gz",
+      makeGeoipSnapshotPayload("etag-surge-v1", {
+        cn: {
+          ipv4Cidrs: ["1.1.1.0/24"],
+          ipv6Cidrs: ["2001:db8::/32"],
+          reverseMatch: false,
+        },
+      }),
+    );
+    await bucket.putJson("snapshots/etag-surge-v1/geoip/index.json", {
+      cn: {
+        name: "CN",
+        sourceFile: "cn",
+        ipv4Count: 1,
+        ipv6Count: 1,
+        defaultPath: "geoip/cn.yaml",
+        noResolvePath: "geoip/cn.yaml?no_resolve=true",
+      },
+    });
+  }
+
+  test("returns geosite index on /surge/geosite", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    await setupSurgeState(bucket);
+
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request("https://example.com/surge/geosite"),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.google).toBeDefined();
+  });
+
+  test("returns surge .list format with standard mode (default)", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    await setupSurgeState(bucket);
+
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request("https://example.com/surge/geosite/google"),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/plain; charset=utf-8",
+    );
+    expect(response.headers.get("x-surge-regex-mode")).toBe("standard");
+
+    const text = await response.text();
+    expect(text).toContain("DOMAIN-SUFFIX,google.com");
+    expect(text).toContain("DOMAIN,api.example.net");
+    expect(text).toContain("DOMAIN-KEYWORD,googlevideo");
+  });
+
+  test("converts regex in standard mode", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    await setupSurgeState(bucket);
+
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request(
+        "https://example.com/surge/geosite/google?regex_mode=standard",
+      ),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain("URL-REGEX,");
+    expect(text).toContain("youtube");
+  });
+
+  test("converts regex in aggressive mode", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    await setupSurgeState(bucket);
+
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request(
+        "https://example.com/surge/geosite/google?regex_mode=aggressive",
+      ),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain("URL-REGEX,");
+  });
+
+  test("strips .list suffix from name", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    await setupSurgeState(bucket);
+
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request("https://example.com/surge/geosite/google.list"),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain("DOMAIN-SUFFIX,google.com");
+  });
+
+  test("returns surge geoip in IP-CIDR format", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    await setupSurgeState(bucket);
+
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request("https://example.com/surge/geoip/cn"),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/plain; charset=utf-8",
+    );
+
+    const text = await response.text();
+    expect(text).toContain("IP-CIDR,1.1.1.0/24");
+    expect(text).toContain("IP-CIDR6,2001:db8::/32");
+    // no YAML structure
+    expect(text).not.toContain("ip_cidr_set:");
+  });
+
+  test("appends ,no-resolve to geoip rules when flag is set", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    await setupSurgeState(bucket);
+
+    const worker = createWorker();
+    const response = await worker.fetch(
+      new Request("https://example.com/surge/geoip/cn?no_resolve=true"),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain("IP-CIDR,1.1.1.0/24,no-resolve");
+    expect(text).toContain("IP-CIDR6,2001:db8::/32,no-resolve");
+  });
+
+  test("caches surge artifacts in correct R2 path", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+    await setupSurgeState(bucket);
+
+    const worker = createWorker();
+    await worker.fetch(
+      new Request("https://example.com/surge/geosite/google"),
+      env,
+      new TestContext(),
+    );
+
+    const artifact = await bucket.get(
+      "artifacts/etag-surge-v1/surge/geosite/google@standard.list",
+    );
+    expect(artifact).not.toBeNull();
+    const text = await artifact!.text();
+    expect(text).toContain("DOMAIN-SUFFIX,google.com");
+  });
+
+  test("returns 503 for surge routes when data not ready", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env: WorkerEnv = { GEOSITE_BUCKET: bucket };
+
+    const worker = createWorker();
+    const geositeRes = await worker.fetch(
+      new Request("https://example.com/surge/geosite/google"),
+      env,
+      new TestContext(),
+    );
+    expect(geositeRes.status).toBe(503);
+
+    const geoipRes = await worker.fetch(
+      new Request("https://example.com/surge/geoip/cn"),
+      env,
+      new TestContext(),
+    );
+    expect(geoipRes.status).toBe(503);
+  });
+});

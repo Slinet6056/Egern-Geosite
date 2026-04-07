@@ -1,4 +1,4 @@
-import type { RuleMatchCounts } from "$lib/panel/types";
+import type { RuleMatchCounts, SurgeRuleMatchCounts } from "$lib/panel/types";
 
 export function countRuleLines(text: string): number {
   const lines = text.split(/\r?\n/);
@@ -62,4 +62,38 @@ export function countRuleMatchTypes(text: string): RuleMatchCounts {
   }
 
   return counts;
+}
+
+export function countSurgeRuleMatchTypes(text: string): SurgeRuleMatchCounts {
+  const counts: SurgeRuleMatchCounts = {
+    domain: 0,
+    suffix: 0,
+    keyword: 0,
+    urlRegex: 0,
+  };
+
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+
+    if (trimmed.startsWith("DOMAIN-SUFFIX,")) {
+      counts.suffix += 1;
+    } else if (trimmed.startsWith("DOMAIN-KEYWORD,")) {
+      counts.keyword += 1;
+    } else if (trimmed.startsWith("DOMAIN,")) {
+      counts.domain += 1;
+    } else if (trimmed.startsWith("URL-REGEX,")) {
+      counts.urlRegex += 1;
+    }
+  }
+
+  return counts;
+}
+
+export function countSurgeRuleLines(text: string): number {
+  const lines = text.split(/\r?\n/);
+  return lines.filter(
+    (line) => line.trim().length > 0 && !line.trim().startsWith("#"),
+  ).length;
 }

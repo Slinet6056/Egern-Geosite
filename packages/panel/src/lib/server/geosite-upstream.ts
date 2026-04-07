@@ -19,6 +19,10 @@ function getGeositeServiceBinding(
   return null;
 }
 
+export function isSurgeHost(hostname: string): boolean {
+  return hostname === "surge.slinet.moe";
+}
+
 export async function fetchGeositeUpstream({
   request,
   url,
@@ -35,7 +39,17 @@ export async function fetchGeositeUpstream({
     throw new Error("Missing required Cloudflare service binding: GEOSITE_API");
   }
 
-  const internalUrl = `https://geosite.internal${url.pathname}${url.search}`;
+  // 当请求来自 surge.slinet.moe 时，将路径重写到 /surge/ 前缀
+  let internalPath = `${url.pathname}${url.search}`;
+  if (isSurgeHost(url.hostname)) {
+    if (url.pathname.startsWith("/geosite")) {
+      internalPath = `/surge${url.pathname}${url.search}`;
+    } else if (url.pathname.startsWith("/geoip")) {
+      internalPath = `/surge${url.pathname}${url.search}`;
+    }
+  }
+
+  const internalUrl = `https://geosite.internal${internalPath}`;
   return serviceBinding.fetch(internalUrl, {
     headers: {
       accept,
