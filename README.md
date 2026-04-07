@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Egern Geosite</h1>
-  <p>Automatically converts <code>Loyalsoldier/v2ray-rules-dat</code> datasets (geosite + geoip) into ready-to-use Egern rule sets.</p>
+  <p>Automatically converts <a href="https://github.com/Loyalsoldier/v2ray-rules-dat">Loyalsoldier/v2ray-rules-dat</a> datasets (geosite + geoip) into ready-to-use Egern rule sets.</p>
   <p>
     English | <a href="./README.zh-CN.md">中文</a>
   </p>
@@ -15,7 +15,7 @@
 
 ## Direct Use
 
-1. Open the dashboard: https://egern.slinet.moe.
+1. Open the dashboard: <https://egern.slinet.moe>.
 2. Search and select a dataset.
 3. Copy the generated raw URL.
 4. Reference it in your Egern `rule_set` rule.

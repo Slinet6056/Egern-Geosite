@@ -3,7 +3,7 @@
   <p>
     中文 | <a href="./README.md">English</a>
   </p>
-  <p>自动转换 <code>Loyalsoldier/v2ray-rules-dat</code> 数据集（geosite + geoip）为 Egern 可直接使用的规则集。</p>
+  <p>自动转换 <a href="https://github.com/Loyalsoldier/v2ray-rules-dat">Loyalsoldier/v2ray-rules-dat</a> 数据集（geosite + geoip）为 Egern 可直接使用的规则集。</p>
   <p>
     <a href="https://egern.slinet.moe"><strong>打开可视化面板</strong></a>
   </p>
@@ -15,7 +15,7 @@
 
 ## 直接使用
 
-1. 打开可视化面板：https://egern.slinet.moe。
+1. 打开可视化面板：<https://egern.slinet.moe。>
 2. 搜索并选择数据集。
 3. 复制页面给出的原始链接。
 4. 在 Egern 的 `rule_set` 规则中引用。
