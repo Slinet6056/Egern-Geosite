@@ -73,9 +73,9 @@ function convertStandard(pattern: string): string | null {
     return `^https?://${inner}/`;
   }
 
-  // 模式3: \.domain$ → 后缀匹配（必须有子域）
-  if (!hasStart && hasEnd && inner.startsWith("\\.")) {
-    if (!isDomainSafe(inner.slice(2))) return null;
+  // 模式3: xxx$（无 ^）→ 安全的主机后缀匹配
+  if (!hasStart && hasEnd) {
+    if (!isDomainSafe(inner)) return null;
     return `^https?://[^/]*${inner}/`;
   }
 

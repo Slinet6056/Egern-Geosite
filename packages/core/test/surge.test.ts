@@ -51,6 +51,7 @@ describe("emitSurgeRuleset", () => {
         "domain:example.com",
         "regexp:(^|\\.)netflix\\.com$",
         "regexp:^cdn\\d-epicgames-\\d+\\.file\\.myqcloud\\.com$",
+        "regexp:javdb\\d+\\.com$",
       ].join("\n"),
     });
 
@@ -61,10 +62,11 @@ describe("emitSurgeRuleset", () => {
       "DOMAIN-SUFFIX,example.com",
       "URL-REGEX,^https?://([^/]+\\.)?netflix\\.com/",
       "URL-REGEX,^https?://cdn\\d-epicgames-\\d+\\.file\\.myqcloud\\.com/",
+      "URL-REGEX,^https?://[^/]*javdb\\d+\\.com/",
     ]);
     expect(output.report.regex).toEqual({
-      total: 2,
-      converted: 2,
+      total: 3,
+      converted: 3,
       skipped: 0,
     });
   });

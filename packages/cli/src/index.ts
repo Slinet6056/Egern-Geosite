@@ -15,8 +15,18 @@ import {
   type ListStats,
 } from "@egern-geosite/core";
 
-import { getStringFlag, parseCliArgs } from "./args.js";
+import {
+  analyzeSurgeRegexCoverage,
+  printRegexAnalysisSummary,
+  splitListArg,
+  writeRegexAnalysisReport,
+} from "./analyze-surge-regex.js";
+import { getBooleanFlag, getStringFlag, parseCliArgs } from "./args.js";
 import { loadListsFromDirectory } from "./fs-loader.js";
+import {
+  prepareUpstreamDataDir,
+  type UpstreamDataDirResult,
+} from "./upstream.js";
 
 interface BuildIndexEntry {
   name: string;
@@ -36,6 +46,8 @@ export async function runCli(argv: string[]): Promise<number> {
   switch (parsed.command) {
     case "build":
       return runBuild(parsed.flags);
+    case "analyze-surge-regex":
+      return runAnalyzeSurgeRegex(parsed.flags);
     case "help":
     default:
       printHelp();
@@ -187,6 +199,44 @@ async function runBuild(
   return 0;
 }
 
+async function runAnalyzeSurgeRegex(
+  flags: Record<string, string | boolean>,
+): Promise<number> {
+  const dataDir = getStringFlag(flags, "data-dir");
+  const fetchUpstream = getBooleanFlag(flags, "fetch-upstream") || !dataDir;
+  const listArg = getStringFlag(flags, "list");
+  const reportJsonPath =
+    getStringFlag(flags, "report-json") ?? "out/surge-regex-analysis.json";
+
+  let preparedDataDir: UpstreamDataDirResult;
+  try {
+    preparedDataDir = await prepareUpstreamDataDir(dataDir, fetchUpstream);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    return 1;
+  }
+
+  try {
+    const report = await analyzeSurgeRegexCoverage({
+      dataDir: preparedDataDir.dataDir,
+      sourceMode: preparedDataDir.mode,
+      ...(listArg ? { listNames: splitListArg(listArg) } : {}),
+    });
+
+    await writeRegexAnalysisReport(reportJsonPath, report);
+    printRegexAnalysisSummary(report);
+    console.log(`report_json=${path.resolve(process.cwd(), reportJsonPath)}`);
+    return 0;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    return 1;
+  } finally {
+    await preparedDataDir.cleanup();
+  }
+}
+
 function hasErrorCode(error: unknown, code: string): boolean {
   if (typeof error !== "object" || error === null || !("code" in error)) {
     return false;
@@ -195,16 +245,10 @@ function hasErrorCode(error: unknown, code: string): boolean {
   return (error as { code?: unknown }).code === code;
 }
 
-function splitListArg(input: string): string[] {
-  return input
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
 function printHelp(): void {
   console.log(`egern-geosite commands:
   build --data-dir <dir> [--list <a,b,c>] [--out-dir <dir>]
+  analyze-surge-regex [--data-dir <dir> | --fetch-upstream] [--list <a,b,c>] [--report-json <path>]
 
 build output layout:
   <out>/meta.json
@@ -212,7 +256,11 @@ build output layout:
   <out>/rules/<list>.yaml
   <out>/resolved/<list>.json
   <out>/stats/global.json
-  <out>/stats/lists/<list>.json`);
+  <out>/stats/lists/<list>.json
+
+analyze-surge-regex report:
+  prints a summary of regex patterns that standard Surge conversion skips
+  writes a JSON report to <path> (default: out/surge-regex-analysis.json)`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

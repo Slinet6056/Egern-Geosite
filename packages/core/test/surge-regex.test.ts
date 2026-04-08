@@ -33,6 +33,21 @@ describe("convertDomainRegexToUrlRegex", () => {
       ).toBe("^https?://[^/]*\\.example\\.com/");
     });
 
+    test("converts end-anchored dynamic host suffix", () => {
+      expect(convertDomainRegexToUrlRegex("javdb\\d+\\.com$", "standard")).toBe(
+        "^https?://[^/]*javdb\\d+\\.com/",
+      );
+    });
+
+    test("converts end-anchored host suffix with required subdomain", () => {
+      expect(
+        convertDomainRegexToUrlRegex(
+          ".+\\.dkr\\.ecr\\.[^\\.]+\\.amazonaws\\.com$",
+          "standard",
+        ),
+      ).toBe("^https?://[^/]*.+\\.dkr\\.ecr\\.[^\\.]+\\.amazonaws\\.com/");
+    });
+
     test("converts anchored domain with \\d and quantifiers", () => {
       expect(
         convertDomainRegexToUrlRegex(
@@ -75,6 +90,12 @@ describe("convertDomainRegexToUrlRegex", () => {
     test("rejects unanchored pattern", () => {
       expect(
         convertDomainRegexToUrlRegex("example\\.com", "standard"),
+      ).toBeNull();
+    });
+
+    test("rejects unsafe end-anchored pattern with lookahead", () => {
+      expect(
+        convertDomainRegexToUrlRegex("(?!foo)example\\.com$", "standard"),
       ).toBeNull();
     });
 

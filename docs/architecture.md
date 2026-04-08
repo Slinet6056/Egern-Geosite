@@ -71,7 +71,7 @@ Surge geosite response headers: `x-surge-regex-mode`, `x-surge-regex-total`, `x-
 `regex_mode` controls how V2Ray `regexp:` entries (which match domain names) are converted to Surge `URL-REGEX` (which matches full URLs):
 
 - `skip`: drop all regexp entries
-- `standard` (default): only converts entries matching recognized structures — exact domain (`^x$`), optional-subdomain suffix (`(^|\.)x$`), forced-subdomain suffix (`\.x$`), domain prefix (`^x`); drops entries with lookaheads, backreferences, slashes, or top-level alternation
+- `standard` (default): converts entries that remain safe as host-only URL patterns — exact domain (`^x$`), optional-subdomain suffix (`(^|\.)x$`), general end-anchored host suffix (`x$`, including forms like `javdb\d+\.com$`), or domain prefix (`^x`); drops entries with lookaheads, backreferences, slashes, or top-level alternation
 - `aggressive`: converts all entries by stripping anchors and wrapping with `^https?://…/`; nothing is dropped, but results may be over-broad or imprecise
 
 ## R2 Storage Layout
