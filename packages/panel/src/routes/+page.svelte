@@ -356,6 +356,7 @@
 
     try {
       const response = await fetch(apiPath, {
+        cache: "no-store",
         headers: {
           accept:
             platform === "surge"

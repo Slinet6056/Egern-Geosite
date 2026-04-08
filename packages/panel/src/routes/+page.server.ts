@@ -270,7 +270,7 @@ export const load: ServerLoad = async ({ cookies, fetch, url }) => {
 
       rawLink =
         platform === "surge"
-          ? buildSurgeRulesPublicPath(selected, null, "skip")
+          ? buildSurgeRulesPublicPath(selected, null, "standard")
           : buildRulesPublicPath(selected, null);
       const rulesKey = `${currentIndex.upstreamEtag}:${selected}`;
       const cachedRules = rulesCache.get(rulesKey);
@@ -286,6 +286,7 @@ export const load: ServerLoad = async ({ cookies, fetch, url }) => {
         const rulesResponse = await fetch(
           `/geosite/${encodeURIComponent(selected)}`,
           {
+            cache: "no-store",
             headers: {
               accept: "application/yaml, text/plain;q=0.8, */*;q=0.1",
             },
