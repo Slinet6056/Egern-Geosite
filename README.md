@@ -91,11 +91,11 @@ If you want to use rule URLs directly, the format is:
 **Regex conversion modes** — V2Ray `regexp:` entries match domain names, but Surge `URL-REGEX` matches full URLs.
 The `regex_mode` parameter controls how they are converted:
 
-| Mode | Behavior |
-|------|----------|
-| `skip` | All `regexp:` entries are dropped |
+| Mode                 | Behavior                                                                                                                                                                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skip`               | All `regexp:` entries are dropped                                                                                                                                                                                                                                          |
 | `standard` (default) | Only converts entries that match recognized structures: exact domain (`^x$`), optional-subdomain suffix (`(^\|\\.)x$`), forced-subdomain suffix (`\\.x$`), or domain prefix (`^x`). Entries with lookaheads, backreferences, slashes, or top-level alternation are dropped |
-| `aggressive` | Converts all entries by stripping anchors and wrapping with `^https?://…/`. Nothing is dropped, but results may be over-broad or imprecise |
+| `aggressive`         | Converts all entries by stripping anchors and wrapping with `^https?://…/`. Nothing is dropped, but results may be over-broad or imprecise                                                                                                                                 |
 
 Surge example:
 
