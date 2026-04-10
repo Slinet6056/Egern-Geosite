@@ -16,7 +16,7 @@
     "@catppuccin/tailwindcss": "^1.0.0",
     "@internationalized/date": "^3.12.0",
     "@sveltejs/adapter-cloudflare": "^7.2.8",
-    "@sveltejs/kit": "^2.56.1",
+    "@sveltejs/kit": "^2.57.1",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@tailwindcss/vite": "^4.2.2",
     "bits-ui": "^2.17.2",
