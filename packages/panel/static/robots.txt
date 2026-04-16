@@ -1,4 +1,7 @@
-# allow crawling everything by default
 User-agent: *
-Disallow:
+Allow: /
+Disallow: /geosite
+Disallow: /geosite/
+Disallow: /geoip
+Disallow: /geoip/
 Sitemap: https://egern.slinet.moe/sitemap.xml
