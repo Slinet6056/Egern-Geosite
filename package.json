@@ -21,10 +21,10 @@
     "worker:r2:create": "pnpm --filter @egern-geosite/worker exec wrangler r2 bucket create egern-geosite"
   },
   "devDependencies": {
-    "@types/node": "^25.5.2",
-    "prettier": "^3.8.1",
+    "@types/node": "^25.6.0",
+    "prettier": "^3.8.2",
     "prettier-plugin-svelte": "^3.5.1",
     "typescript": "^6.0.2",
-    "vitest": "^4.1.3"
+    "vitest": "^4.1.4"
   }
 }
